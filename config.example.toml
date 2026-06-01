@@ -1,0 +1,36 @@
+# Example Prism config — copy to `config.toml` and edit. Env-var overrides:
+#   PRISM_UPSTREAM_TOKEN  → upstream.default_token
+#   PRISM_RELAY_TOKEN     → relay.token
+#   DATABASE_URL          → database.url
+#   PRISM_CONFIG          → path to this file (default: "config.toml")
+
+[upstream]
+host = "https://bitcraft-early-access.spacetimedb.com"
+# Optional global default. Set to a developer-mode token to connect to many
+# regions with one credential. If unset, every region below must provide its
+# own `token`.
+# default_token = "..."
+
+[[upstream.regions]]
+name  = "bitcraft-live-1"
+id    = 1
+# token = "..."   # optional per-region override
+
+[[upstream.regions]]
+name = "bitcraft-live-2"
+id   = 2
+# token = "..."
+
+[relay]
+uri    = "http://127.0.0.1:3000"
+module = "prism-relay"
+token  = "REPLACE_ME"
+
+[database]
+url = "postgres://prism:prism@localhost:5432/prism"
+
+[pipelines]
+resources = true
+enemies   = true
+players   = true
+

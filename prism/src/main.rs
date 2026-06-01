@@ -1,0 +1,90 @@
+//! Prism — BitCraft multi-region relay & historical pipeline.
+
+mod config;
+mod history;
+mod processor;
+mod relay;
+mod shutdown;
+mod upstream;
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use anyhow::Result;
+use log::{error, info};
+use tokio::sync::mpsc::unbounded_channel;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info"),
+    ).init();
+
+    let config_path =
+        std::env::var("PRISM_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
+    let config = Arc::new(config::Config::load(PathBuf::from(&config_path))?);
+    info!(
+        "config loaded: regions={} relay_module={}",
+        config.upstream.regions.len(),
+        config.relay.module,
+    );
+
+    let shutdown = shutdown::Shutdown::new();
+    shutdown::install_ctrl_c(shutdown.clone());
+
+    // Upstream → processor channel (unbounded — backpressure happens at the
+    // per-sink processor→sink channels instead).
+    let (upstream_tx, upstream_rx) = unbounded_channel();
+    // Processor → sink channels (bounded).
+    let (proc_handle, sinks) = processor::channels(&config);
+
+    // Spawn upstream, processor, relay, history concurrently. Each gets a
+    // clone of the shared shutdown coordinator; first hard error triggers
+    // shutdown for everyone.
+    let up = tokio::spawn(spawn_subsystem(
+        "upstream",
+        upstream::run_all(config.clone(), upstream_tx, shutdown.clone()),
+        shutdown.clone(),
+    ));
+    let proc = tokio::spawn(spawn_subsystem(
+        "processor",
+        processor::run(config.clone(), upstream_rx, proc_handle, shutdown.clone()),
+        shutdown.clone(),
+    ));
+    let relay = tokio::spawn(spawn_subsystem(
+        "relay",
+        relay::run(config.clone(), sinks.relay_rx, shutdown.clone()),
+        shutdown.clone(),
+    ));
+    let history = tokio::spawn(spawn_subsystem(
+        "history",
+        history::run(config.clone(), sinks.history_rx, shutdown.clone()),
+        shutdown.clone(),
+    ));
+
+    let _ = tokio::join!(up, proc, relay, history);
+    info!("all subsystems exited; bye");
+    Ok(())
+}
+
+async fn spawn_subsystem<F>(
+    name: &'static str,
+    fut: F,
+    shutdown: shutdown::SharedShutdown,
+) -> Result<()>
+where
+    F: Future<Output = Result<()>> + Send,
+{
+    match fut.await {
+        Ok(()) => {
+            info!("subsystem={name} exited cleanly");
+            Ok(())
+        }
+        Err(e) => {
+            error!("subsystem={name} fatal error: {e:?}");
+            shutdown.lock().await.trigger();
+            Err(e)
+        }
+    }
+}
+

@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["prism", "relay-bindings"]
+# `relay-module` is its own workspace (excluded so it can be published/built standalone).
+exclude = ["relay-module"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "AGPL-3"

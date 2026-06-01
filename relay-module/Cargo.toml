@@ -1,0 +1,13 @@
+[package]
+name = "prism-relay-module"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+spacetimedb = { version = "2.3.0", features = ["unstable"] }
+
+# Standalone workspace so it can be published / versioned independently.
+[workspace]

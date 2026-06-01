@@ -1,0 +1,48 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: prism
+      POSTGRES_PASSWORD: prism
+      POSTGRES_DB: prism
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prism -d prism"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Comment out or remove if pointing prism at maincloud / a remote server.
+#  spacetimedb:
+#    image: clockworklabs/spacetime:latest
+#    restart: unless-stopped
+#    command: ["start"]
+#    ports:
+#      - "3000:3000"
+#    volumes:
+#      - stdb-data:/stdb
+
+  prism:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+#      spacetimedb:
+#        condition: service_started
+    environment:
+      RUST_LOG: "info,prism=debug"
+      PRISM_CONFIG: "/etc/prism/config.toml"
+      DATABASE_URL: "postgres://prism:prism@timescaledb:5432/prism"
+    volumes:
+      - ./config.toml:/etc/prism/config.toml:ro
+
+volumes:
+  timescale-data:
+  stdb-data:

@@ -1,0 +1,7 @@
+[package]
+name = "relay_bindings"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+spacetimedb-sdk = "2.3.0"
