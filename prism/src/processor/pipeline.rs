@@ -10,8 +10,8 @@
 use anyhow::Result;
 use log::{info, warn};
 
-use super::ProcessorHandle;
 use super::join::{EntityLocation, JoinState};
+use super::ProcessorHandle;
 use crate::history::HistoryMsg;
 use crate::relay::{EnemyRow, PlayerRow, RelayMsg, ResourceRow};
 use crate::upstream::{Phase, RegionUpdate};
@@ -41,22 +41,6 @@ pub async fn handle(
 
     let region = state.region(region_id);
 
-    // debug!(
-    //     region_id,
-    //     is_live = region.is_live,
-    //     ?phase,
-    //     res_ins  = update.resource_state.inserts.len(),
-    //     res_del  = update.resource_state.deletes.len(),
-    //     loc_ins  = update.location_state.inserts.len(),
-    //     loc_del  = update.location_state.deletes.len(),
-    //     mob_ins  = update.mobile_entity_state.inserts.len(),
-    //     enemy_ins = update.enemy_state.inserts.len(),
-    //     enemy_del = update.enemy_state.deletes.len(),
-    //     player_ins = update.player_state.inserts.len(),
-    //     player_del = update.player_state.deletes.len(),
-    //     "processing region update"
-    // );
-
     // First Live update after syncing → emit bulk Replace for the full
     // accumulated snapshot, then switch to delta mode.
     if !region.is_live {
@@ -73,12 +57,10 @@ pub async fn handle(
             RelayMsg::ReplaceEnemies   { region_id, rows: enemy },
             RelayMsg::ReplacePlayers   { region_id, rows: play.clone() },
         ].into_iter());
-        // Also seed history with the initial player positions.
-        for row in play {
-            let _ = sinks.history_tx.try_send(HistoryMsg::PlayerLocation {
-                entity_id: row.entity_id, region_id, x: row.x, z: row.z,
-            });
-        }
+        // Skip sending HistoryMsg - initial subscription may give us stale state
+        // (e.g. offline player locations), which we don't want to record
+        // Instead, we'll only record the first movement we get after the live phase
+
         // The snapshot already covered this batch's state; nothing more to emit.
         return Ok(());
     }
@@ -189,11 +171,6 @@ fn emit_deltas(
         }
     }
 
-    // Enemy deletes.
-    for e in &update.enemy_state.deletes {
-        enemy_deletes.push(e.row.entity_id);
-    }
-
     // Mobile entity updates: resolve to enemy or player.
     for e in &update.mobile_entity_state.inserts {
         let dim = e.row.dimension;
@@ -210,41 +187,17 @@ fn emit_deltas(
                 x: e.row.location_x, z: e.row.location_z,
             });
             history_msgs.push(HistoryMsg::PlayerLocation {
-                entity_id: eid, region_id,
+                entity_id: eid,
+                timestamp: e.row.timestamp,
                 x: e.row.location_x, z: e.row.location_z,
             });
         }
     }
 
-    // Kind-arrives-after-location cross leg (entity already had a location in
-    // a prior batch).
-    for e in &update.enemy_state.inserts {
-        if enemy_upserts.iter().any(|r| r.entity_id == e.row.entity_id) { continue; }
-        if let Some(loc) = region.last_location.get(&e.row.entity_id) {
-            if loc.dimension == OVERWORLD_DIM {
-                enemy_upserts.push(EnemyRow {
-                    entity_id: e.row.entity_id, enemy_type: e.row.enemy_type as i32,
-                    region_id, x: loc.x, z: loc.z,
-                });
-            }
-        }
+    // Enemy deletes.
+    for e in &update.enemy_state.deletes {
+        enemy_deletes.push(e.row.entity_id);
     }
-    for e in &update.player_state.inserts {
-        if player_upserts.iter().any(|r| r.entity_id == e.row.entity_id) { continue; }
-        if let Some(loc) = region.last_location.get(&e.row.entity_id) {
-            if loc.dimension == OVERWORLD_DIM {
-                player_upserts.push(PlayerRow {
-                    entity_id: e.row.entity_id, region_id,
-                    x: loc.x, z: loc.z,
-                });
-                history_msgs.push(HistoryMsg::PlayerLocation {
-                    entity_id: e.row.entity_id, region_id,
-                    x: loc.x, z: loc.z,
-                });
-            }
-        }
-    }
-
     // Player deletes.
     for e in &update.player_state.deletes {
         player_deletes.push(e.row.entity_id);

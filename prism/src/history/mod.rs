@@ -8,11 +8,11 @@ use std::time::Duration;
 
 use anyhow::Result;
 use hashbrown::HashMap;
-use sqlx::PgPool;
-use sqlx::postgres::PgPoolOptions;
-use tokio::sync::mpsc::Receiver;
-use tokio::time::{Instant, interval_at};
 use log::{debug, error, info, warn};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
+use tokio::sync::mpsc::Receiver;
+use tokio::time::{interval_at, Instant};
 
 use crate::config::Config;
 use crate::shutdown::SharedShutdown;
@@ -28,7 +28,7 @@ const MAX_BATCH: usize = 500;
 pub enum HistoryMsg {
     PlayerLocation {
         entity_id: u64,
-        region_id: u8,
+        timestamp: u64,
         x: i32,
         z: i32,
     },
@@ -53,7 +53,10 @@ pub async fn run(
     sqlx::raw_sql(include_str!("schema.sql"))
         .execute(&pool)
         .await
-        .map_err(|e| { error!("history: migration failed: {e:?}"); e })?;
+        .map_err(|e| {
+            error!("history: migration failed: {e:?}");
+            e
+        })?;
     info!("history: migrations applied, starting writer");
 
     let Some(shutdown_signal) = shutdown.lock().await.register() else {
@@ -85,14 +88,14 @@ pub async fn run(
                     break;
                 };
                 match msg {
-                    HistoryMsg::PlayerLocation { entity_id, region_id, x, z } => {
+                    HistoryMsg::PlayerLocation { entity_id, timestamp, x, z } => {
                         // Dedup: skip if same large hex tile as last sample.
                         let cell = (x / 3000, z / 3000);
                         if last_pos.get(&entity_id).is_some_and(|prev| *prev == cell) {
                             continue;
                         }
                         last_pos.insert(entity_id, cell);
-                        buffer.push(PlayerLocationRow { entity_id, region_id, x, z });
+                        buffer.push(PlayerLocationRow { entity_id, timestamp, x, z });
                         if buffer.len() >= MAX_BATCH {
                             flush(&pool, &mut buffer).await;
                         }
@@ -117,32 +120,40 @@ pub async fn run(
 
 struct PlayerLocationRow {
     entity_id: u64,
-    region_id: u8,
+    timestamp: u64,
     x: i32,
     z: i32,
 }
 
 async fn flush(pool: &PgPool, buffer: &mut Vec<PlayerLocationRow>) {
     let rows = std::mem::take(buffer);
-    if rows.is_empty() { return; }
-    debug!("history flush: inserting player_locations count={}", rows.len());
+    if rows.is_empty() {
+        return;
+    }
+    debug!(
+        "history flush: inserting player_locations count={}",
+        rows.len()
+    );
 
     // Collect column arrays for unnest bulk insert.
-    // Casting u64 → i64 and u8 → i16 is safe: game entity IDs and region IDs
-    // are well within the signed range of their respective types.
+    // Casting u64 → i64 is safe: game entity IDs and timestamps (µs since epoch)
+    // are well within the signed i64 range for any reasonable game timestamp.
     let entity_ids: Vec<i64> = rows.iter().map(|r| r.entity_id as i64).collect();
-    let region_ids: Vec<i16> = rows.iter().map(|r| r.region_id as i16).collect();
-    let xs: Vec<i32>         = rows.iter().map(|r| r.x).collect();
-    let zs: Vec<i32>         = rows.iter().map(|r| r.z).collect();
+    let timestamps: Vec<i64> = rows.iter().map(|r| r.timestamp as i64).collect();
+    let xs: Vec<i32> = rows.iter().map(|r| r.x).collect();
+    let zs: Vec<i32> = rows.iter().map(|r| r.z).collect();
 
     if let Err(e) = sqlx::query(
-        "INSERT INTO player_locations (entity_id, region_id, x, z) \
-         SELECT * FROM unnest($1::bigint[], $2::smallint[], $3::int[], $4::int[])"
+        "INSERT INTO player_locations (entity_id, x, z, recorded_at) \
+         SELECT entity_id, x, z, \
+                'epoch'::timestamptz + ts_us * interval '1 microsecond' \
+         FROM unnest($1::bigint[], $2::int[], $3::int[], $4::bigint[]) \
+              AS t(entity_id, x, z, ts_us)",
     )
     .bind(&entity_ids[..])
-    .bind(&region_ids[..])
     .bind(&xs[..])
     .bind(&zs[..])
+    .bind(&timestamps[..])
     .execute(pool)
     .await
     {

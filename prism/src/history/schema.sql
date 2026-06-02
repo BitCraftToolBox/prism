@@ -5,10 +5,9 @@ CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 CREATE TABLE IF NOT EXISTS player_locations (
     entity_id   BIGINT      NOT NULL,
-    region_id   SMALLINT    NOT NULL,
     x           INTEGER     NOT NULL,
     z           INTEGER     NOT NULL,
-    recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    recorded_at TIMESTAMPTZ NOT NULL
 );
 
 SELECT create_hypertable('player_locations', 'recorded_at',
@@ -17,5 +16,3 @@ SELECT create_hypertable('player_locations', 'recorded_at',
 
 CREATE INDEX IF NOT EXISTS player_locations_entity_idx
     ON player_locations (entity_id, recorded_at DESC);
-CREATE INDEX IF NOT EXISTS player_locations_region_idx
-    ON player_locations (region_id, recorded_at DESC);
