@@ -31,7 +31,7 @@ run:
     cargo run -p prism
 
 fmt:
-    cargo fmt --all
+    cargo fmt -p prism
 
 clippy:
     cargo clippy --workspace --all-targets -- -D warnings

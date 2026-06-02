@@ -61,7 +61,9 @@ pub struct PipelinesConfig {
     pub players: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 fn default_upstream_host() -> String {
     "https://bitcraft-early-access.spacetimedb.com".into()
 }
@@ -111,5 +113,3 @@ impl Config {
             .or(self.upstream.default_token.as_deref())
     }
 }
-
-

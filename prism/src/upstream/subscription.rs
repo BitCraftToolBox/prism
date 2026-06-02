@@ -34,9 +34,11 @@ impl Pipeline {
         match self {
             Pipeline::Resources => vec![
                 "SELECT res.* FROM resource_state res \
-                 JOIN location_state loc ON res.entity_id = loc.entity_id;".into(),
+                 JOIN location_state loc ON res.entity_id = loc.entity_id;"
+                    .into(),
                 "SELECT loc.* FROM location_state loc \
-                 JOIN resource_state res ON loc.entity_id = res.entity_id;".into(),
+                 JOIN resource_state res ON loc.entity_id = res.entity_id;"
+                    .into(),
             ],
             Pipeline::Enemies => vec![
                 "SELECT * FROM enemy_state;".into(),
@@ -52,9 +54,15 @@ impl Pipeline {
 
 pub fn enabled_pipelines(cfg: &PipelinesConfig) -> Vec<Pipeline> {
     let mut out = Vec::new();
-    if cfg.resources { out.push(Pipeline::Resources); }
-    if cfg.enemies   { out.push(Pipeline::Enemies); }
-    if cfg.players   { out.push(Pipeline::Players); }
+    if cfg.resources {
+        out.push(Pipeline::Resources);
+    }
+    if cfg.enemies {
+        out.push(Pipeline::Enemies);
+    }
+    if cfg.players {
+        out.push(Pipeline::Players);
+    }
     out
 }
 
@@ -109,8 +117,7 @@ fn advance(ctx: &DbConnection, state: Arc<SubState>, idx: usize) {
         .on_error(move |ectx: &ErrorContext, e: SdkError| {
             error!(
                 "[{}] subscription error in pipeline {:?}: {:?}",
-                state_for_error.region,
-                state_for_error.pipelines[idx], e
+                state_for_error.region, state_for_error.pipelines[idx], e
             );
             let _ = ectx.disconnect();
         })
@@ -123,11 +130,11 @@ fn advance(ctx: &DbConnection, state: Arc<SubState>, idx: usize) {
 fn advance_ctx<C>(ctx: &C, state: Arc<SubState>, idx: usize)
 where
     C: DbContext<
-        DbView = <DbConnection as DbContext>::DbView,
-        Reducers = <DbConnection as DbContext>::Reducers,
-        SetReducerFlags = <DbConnection as DbContext>::SetReducerFlags,
-        SubscriptionBuilder = <DbConnection as DbContext>::SubscriptionBuilder,
-    >,
+            DbView = <DbConnection as DbContext>::DbView,
+            Reducers = <DbConnection as DbContext>::Reducers,
+            SetReducerFlags = <DbConnection as DbContext>::SetReducerFlags,
+            SubscriptionBuilder = <DbConnection as DbContext>::SubscriptionBuilder,
+        >,
 {
     if idx >= state.pipelines.len() {
         if let Some(cb) = state.on_all_applied.lock().unwrap().take() {
@@ -152,8 +159,7 @@ where
         .on_error(move |ectx: &ErrorContext, e: SdkError| {
             error!(
                 "[{}] subscription error in pipeline {:?}: {:?}",
-                state_for_error.region,
-                state_for_error.pipelines[idx], e
+                state_for_error.region, state_for_error.pipelines[idx], e
             );
             let _ = ectx.disconnect();
         })

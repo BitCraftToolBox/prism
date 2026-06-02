@@ -10,8 +10,8 @@
 use anyhow::Result;
 use log::{info, warn};
 
-use super::join::{EntityLocation, JoinState};
 use super::ProcessorHandle;
+use super::join::{EntityLocation, JoinState};
 use crate::history::HistoryMsg;
 use crate::relay::{EnemyRow, PlayerRow, RelayMsg, ResourceRow};
 use crate::upstream::{Phase, RegionUpdate};
@@ -23,7 +23,11 @@ pub async fn handle(
     msg: RegionUpdate,
     sinks: &ProcessorHandle,
 ) -> Result<()> {
-    let RegionUpdate { region_id, phase, update } = msg;
+    let RegionUpdate {
+        region_id,
+        phase,
+        update,
+    } = msg;
 
     // On the first Syncing update for this region (e.g. after a reconnect),
     // wipe stale join state so we start clean.
@@ -45,18 +49,34 @@ pub async fn handle(
     // accumulated snapshot, then switch to delta mode.
     if !region.is_live {
         region.is_live = true;
-        let res   = region.snapshot_resources(region_id);
+        let res = region.snapshot_resources(region_id);
         let enemy = region.snapshot_enemies(region_id);
-        let play  = region.snapshot_players(region_id);
+        let play = region.snapshot_players(region_id);
         info!(
             "initial snapshot ready — emitting bulk replace: region_id={} resources={} enemies={} players={}",
-            region_id, res.len(), enemy.len(), play.len(),
+            region_id,
+            res.len(),
+            enemy.len(),
+            play.len(),
         );
-        send_relay(&sinks.relay_tx, [
-            RelayMsg::ReplaceResources { region_id, rows: res },
-            RelayMsg::ReplaceEnemies   { region_id, rows: enemy },
-            RelayMsg::ReplacePlayers   { region_id, rows: play.clone() },
-        ].into_iter());
+        send_relay(
+            &sinks.relay_tx,
+            [
+                RelayMsg::ReplaceResources {
+                    region_id,
+                    rows: res,
+                },
+                RelayMsg::ReplaceEnemies {
+                    region_id,
+                    rows: enemy,
+                },
+                RelayMsg::ReplacePlayers {
+                    region_id,
+                    rows: play.clone(),
+                },
+            ]
+            .into_iter(),
+        );
         // Skip sending HistoryMsg - initial subscription may give us stale state
         // (e.g. offline player locations), which we don't want to record
         // Instead, we'll only record the first movement we get after the live phase
@@ -84,9 +104,14 @@ fn update_join_maps(
         region.last_location.remove(&e.row.entity_id);
     }
     for e in &update.location_state.inserts {
-        region.last_location.insert(e.row.entity_id, EntityLocation {
-            x: e.row.x, z: e.row.z, dimension: e.row.dimension
-        });
+        region.last_location.insert(
+            e.row.entity_id,
+            EntityLocation {
+                x: e.row.x,
+                z: e.row.z,
+                dimension: e.row.dimension,
+            },
+        );
     }
     for e in &update.location_state.deletes {
         // location_state is exclusively for resource entities — no need to
@@ -94,7 +119,9 @@ fn update_join_maps(
         region.last_location.remove(&e.row.entity_id);
     }
     for e in &update.resource_state.inserts {
-        region.resource_kind.insert(e.row.entity_id, e.row.resource_id);
+        region
+            .resource_kind
+            .insert(e.row.entity_id, e.row.resource_id);
     }
 
     // Enemies: enemy_state for kind, mobile_entity_state for location.
@@ -103,7 +130,9 @@ fn update_join_maps(
         region.last_location.remove(&e.row.entity_id);
     }
     for e in &update.enemy_state.inserts {
-        region.enemy_kind.insert(e.row.entity_id, e.row.enemy_type as i32);
+        region
+            .enemy_kind
+            .insert(e.row.entity_id, e.row.enemy_type as i32);
     }
 
     // Players: player_state for membership, mobile_entity_state for location.
@@ -117,10 +146,14 @@ fn update_join_maps(
 
     // Mobile entity state provides locations for both enemies and players.
     for e in &update.mobile_entity_state.inserts {
-        region.last_location.insert(e.row.entity_id, EntityLocation {
-            x: e.row.location_x, z: e.row.location_z,
-            dimension: e.row.dimension,
-        });
+        region.last_location.insert(
+            e.row.entity_id,
+            EntityLocation {
+                x: e.row.location_x,
+                z: e.row.location_z,
+                dimension: e.row.dimension,
+            },
+        );
     }
 }
 
@@ -135,12 +168,12 @@ fn emit_deltas(
     sinks: &ProcessorHandle,
 ) {
     let mut resource_upserts: Vec<ResourceRow> = Vec::new();
-    let mut resource_deletes: Vec<u64>          = Vec::new();
-    let mut enemy_upserts:    Vec<EnemyRow>     = Vec::new();
-    let mut enemy_deletes:    Vec<u64>           = Vec::new();
-    let mut player_upserts:   Vec<PlayerRow>    = Vec::new();
-    let mut player_deletes:   Vec<u64>           = Vec::new();
-    let mut history_msgs:     Vec<HistoryMsg>   = Vec::new();
+    let mut resource_deletes: Vec<u64> = Vec::new();
+    let mut enemy_upserts: Vec<EnemyRow> = Vec::new();
+    let mut enemy_deletes: Vec<u64> = Vec::new();
+    let mut player_upserts: Vec<PlayerRow> = Vec::new();
+    let mut player_deletes: Vec<u64> = Vec::new();
+    let mut history_msgs: Vec<HistoryMsg> = Vec::new();
 
     // Resource deletes.
     for e in &update.resource_state.deletes {
@@ -150,22 +183,33 @@ fn emit_deltas(
     // Resource upserts: when resource_state or location_state arrives in this
     // batch we can now emit because the other leg is already in the maps.
     for e in &update.resource_state.inserts {
-        if let Some(loc) = region.last_location.get(&e.row.entity_id) {
-            if loc.dimension == OVERWORLD_DIM {
-                resource_upserts.push(ResourceRow {
-                    entity_id: e.row.entity_id, resource_id: e.row.resource_id,
-                    region_id, x: loc.x, z: loc.z,
-                });
-            }
+        if let Some(loc) = region.last_location.get(&e.row.entity_id)
+            && loc.dimension == OVERWORLD_DIM
+        {
+            resource_upserts.push(ResourceRow {
+                entity_id: e.row.entity_id,
+                resource_id: e.row.resource_id,
+                region_id,
+                x: loc.x,
+                z: loc.z,
+            });
         }
     }
     for e in &update.location_state.inserts {
         if let Some(&res_id) = region.resource_kind.get(&e.row.entity_id) {
-            if resource_upserts.iter().any(|r| r.entity_id == e.row.entity_id) { continue; }
+            if resource_upserts
+                .iter()
+                .any(|r| r.entity_id == e.row.entity_id)
+            {
+                continue;
+            }
             if e.row.dimension == OVERWORLD_DIM {
                 resource_upserts.push(ResourceRow {
-                    entity_id: e.row.entity_id, resource_id: res_id,
-                    region_id, x: e.row.x, z: e.row.z,
+                    entity_id: e.row.entity_id,
+                    resource_id: res_id,
+                    region_id,
+                    x: e.row.x,
+                    z: e.row.z,
                 });
             }
         }
@@ -174,22 +218,30 @@ fn emit_deltas(
     // Mobile entity updates: resolve to enemy or player.
     for e in &update.mobile_entity_state.inserts {
         let dim = e.row.dimension;
-        if dim != OVERWORLD_DIM { continue; }
+        if dim != OVERWORLD_DIM {
+            continue;
+        }
         let eid = e.row.entity_id;
         if let Some(&etype) = region.enemy_kind.get(&eid) {
             enemy_upserts.push(EnemyRow {
-                entity_id: eid, enemy_type: etype,
-                region_id, x: e.row.location_x, z: e.row.location_z,
+                entity_id: eid,
+                enemy_type: etype,
+                region_id,
+                x: e.row.location_x,
+                z: e.row.location_z,
             });
         } else if region.player.contains_key(&eid) {
             player_upserts.push(PlayerRow {
-                entity_id: eid, region_id,
-                x: e.row.location_x, z: e.row.location_z,
+                entity_id: eid,
+                region_id,
+                x: e.row.location_x,
+                z: e.row.location_z,
             });
             history_msgs.push(HistoryMsg::PlayerLocation {
                 entity_id: eid,
                 timestamp: e.row.timestamp,
-                x: e.row.location_x, z: e.row.location_z,
+                x: e.row.location_x,
+                z: e.row.location_z,
             });
         }
     }
@@ -203,23 +255,39 @@ fn emit_deltas(
         player_deletes.push(e.row.entity_id);
     }
 
-    send_relay(&sinks.relay_tx, resource_upserts.into_iter().map(RelayMsg::UpsertResource));
-    send_relay(&sinks.relay_tx, resource_deletes.into_iter().map(RelayMsg::DeleteResource));
-    send_relay(&sinks.relay_tx, enemy_upserts.into_iter().map(RelayMsg::UpsertEnemy));
-    send_relay(&sinks.relay_tx, enemy_deletes.into_iter().map(RelayMsg::DeleteEnemy));
-    send_relay(&sinks.relay_tx, player_upserts.into_iter().map(RelayMsg::UpsertPlayer));
-    send_relay(&sinks.relay_tx, player_deletes.into_iter().map(RelayMsg::DeletePlayer));
+    send_relay(
+        &sinks.relay_tx,
+        resource_upserts.into_iter().map(RelayMsg::UpsertResource),
+    );
+    send_relay(
+        &sinks.relay_tx,
+        resource_deletes.into_iter().map(RelayMsg::DeleteResource),
+    );
+    send_relay(
+        &sinks.relay_tx,
+        enemy_upserts.into_iter().map(RelayMsg::UpsertEnemy),
+    );
+    send_relay(
+        &sinks.relay_tx,
+        enemy_deletes.into_iter().map(RelayMsg::DeleteEnemy),
+    );
+    send_relay(
+        &sinks.relay_tx,
+        player_upserts.into_iter().map(RelayMsg::UpsertPlayer),
+    );
+    send_relay(
+        &sinks.relay_tx,
+        player_deletes.into_iter().map(RelayMsg::DeletePlayer),
+    );
     for msg in history_msgs {
-        if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = sinks.history_tx.try_send(msg) {
+        if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = sinks.history_tx.try_send(msg)
+        {
             warn!("history channel full — dropping player location sample");
         }
     }
 }
 
-fn send_relay(
-    tx: &tokio::sync::mpsc::Sender<RelayMsg>,
-    msgs: impl Iterator<Item = RelayMsg>,
-) {
+fn send_relay(tx: &tokio::sync::mpsc::Sender<RelayMsg>, msgs: impl Iterator<Item = RelayMsg>) {
     let mut dropped = 0usize;
     for msg in msgs {
         if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = tx.try_send(msg) {

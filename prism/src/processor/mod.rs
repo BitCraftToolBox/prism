@@ -12,8 +12,8 @@ pub mod pipeline;
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, channel};
 use log::{debug, warn};
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, channel};
 
 use crate::config::Config;
 use crate::history::{HistoryMsg, history_capacity};
@@ -39,8 +39,14 @@ pub fn channels(config: &Config) -> (ProcessorHandle, ProcessorSinks) {
     let (relay_tx, relay_rx) = channel(relay_capacity(config));
     let (history_tx, history_rx) = channel(history_capacity(config));
     (
-        ProcessorHandle { relay_tx, history_tx },
-        ProcessorSinks { relay_rx, history_rx },
+        ProcessorHandle {
+            relay_tx,
+            history_tx,
+        },
+        ProcessorSinks {
+            relay_rx,
+            history_rx,
+        },
     )
 }
 

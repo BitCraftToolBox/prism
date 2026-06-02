@@ -87,8 +87,12 @@ pub async fn run_all(
     for h in handles {
         match h.await {
             Ok(Ok(())) => {}
-            Ok(Err(e)) => { first_err.get_or_insert(e); }
-            Err(e) => { first_err.get_or_insert(anyhow::anyhow!(e)); }
+            Ok(Err(e)) => {
+                first_err.get_or_insert(e);
+            }
+            Err(e) => {
+                first_err.get_or_insert(anyhow::anyhow!(e));
+            }
         }
     }
     match first_err {
@@ -96,6 +100,3 @@ pub async fn run_all(
         None => Ok(()),
     }
 }
-
-
-

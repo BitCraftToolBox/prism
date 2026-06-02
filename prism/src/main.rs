@@ -16,12 +16,9 @@ use tokio::sync::mpsc::unbounded_channel;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info"),
-    ).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let config_path =
-        std::env::var("PRISM_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
+    let config_path = std::env::var("PRISM_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
     let config = Arc::new(config::Config::load(PathBuf::from(&config_path))?);
     info!(
         "config loaded: regions={} relay_module={}",
@@ -87,4 +84,3 @@ where
         }
     }
 }
-

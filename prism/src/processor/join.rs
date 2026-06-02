@@ -6,8 +6,8 @@
 //! resource_state, mobile_entity vs. enemy_state, ...). These maps are
 //! maintained across update batches, mirroring nodeindex's `consume()`.
 
-use hashbrown::HashMap;
 use crate::relay::{EnemyRow, PlayerRow, ResourceRow};
+use hashbrown::HashMap;
 
 #[derive(Default)]
 pub struct JoinState {
@@ -42,34 +42,68 @@ const OVERWORLD_DIM: u32 = 1;
 impl RegionJoinState {
     /// Collect all known overworld resources as relay rows for a bulk replace.
     pub fn snapshot_resources(&self, region_id: u8) -> Vec<ResourceRow> {
-        self.resource_kind.iter().filter_map(|(&eid, &res_id)| {
-            let loc = self.last_location.get(&eid)?;
-            if loc.dimension != OVERWORLD_DIM { return None; }
-            Some(ResourceRow { entity_id: eid, resource_id: res_id, region_id, x: loc.x, z: loc.z })
-        }).collect()
+        self.resource_kind
+            .iter()
+            .filter_map(|(&eid, &res_id)| {
+                let loc = self.last_location.get(&eid)?;
+                if loc.dimension != OVERWORLD_DIM {
+                    return None;
+                }
+                Some(ResourceRow {
+                    entity_id: eid,
+                    resource_id: res_id,
+                    region_id,
+                    x: loc.x,
+                    z: loc.z,
+                })
+            })
+            .collect()
     }
 
     /// Collect all known overworld enemies as relay rows for a bulk replace.
     pub fn snapshot_enemies(&self, region_id: u8) -> Vec<EnemyRow> {
-        self.enemy_kind.iter().filter_map(|(&eid, &etype)| {
-            let loc = self.last_location.get(&eid)?;
-            if loc.dimension != OVERWORLD_DIM { return None; }
-            Some(EnemyRow { entity_id: eid, enemy_type: etype, region_id, x: loc.x, z: loc.z })
-        }).collect()
+        self.enemy_kind
+            .iter()
+            .filter_map(|(&eid, &etype)| {
+                let loc = self.last_location.get(&eid)?;
+                if loc.dimension != OVERWORLD_DIM {
+                    return None;
+                }
+                Some(EnemyRow {
+                    entity_id: eid,
+                    enemy_type: etype,
+                    region_id,
+                    x: loc.x,
+                    z: loc.z,
+                })
+            })
+            .collect()
     }
 
     /// Collect all known overworld players as relay rows for a bulk replace.
     pub fn snapshot_players(&self, region_id: u8) -> Vec<PlayerRow> {
-        self.player.keys().filter_map(|&eid| {
-            let loc = self.last_location.get(&eid)?;
-            if loc.dimension != OVERWORLD_DIM { return None; }
-            Some(PlayerRow { entity_id: eid, region_id, x: loc.x, z: loc.z })
-        }).collect()
+        self.player
+            .keys()
+            .filter_map(|&eid| {
+                let loc = self.last_location.get(&eid)?;
+                if loc.dimension != OVERWORLD_DIM {
+                    return None;
+                }
+                Some(PlayerRow {
+                    entity_id: eid,
+                    region_id,
+                    x: loc.x,
+                    z: loc.z,
+                })
+            })
+            .collect()
     }
 }
 
 impl JoinState {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn region(&mut self, region_id: u8) -> &mut RegionJoinState {
         self.regions.entry(region_id).or_default()

@@ -6,13 +6,13 @@ use std::sync::atomic::AtomicU8;
 use std::time::Duration;
 
 use anyhow::Result;
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use log::{error, info, warn};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use upstream_bindings::ext::ctx::RunUntil;
 use upstream_bindings::region::{DbConnection, DbUpdate};
 
-use super::{Phase, RegionUpdate, SharedPhase, load_phase, store_phase};
 use super::subscription::{enabled_pipelines, queue_subscribe};
+use super::{Phase, RegionUpdate, SharedPhase, load_phase, store_phase};
 use crate::config::{Config, RegionConfig};
 use crate::shutdown::SharedShutdown;
 
@@ -28,20 +28,20 @@ pub async fn run_region(
     let token = match config.token_for(&region) {
         Some(t) => t.to_string(),
         None => {
-                warn!("[{}] no token available; skipping region", region.name);
-                return Ok(());
-            }
-        };
-        let host = if config.upstream.host.is_empty() {
-            UPSTREAM_URI.to_string()
-        } else {
-            config.upstream.host.clone()
-        };
-        let pipelines = enabled_pipelines(&config.pipelines);
-        if pipelines.is_empty() {
-            warn!("[{}] no pipelines enabled; skipping region", region.name);
+            warn!("[{}] no token available; skipping region", region.name);
             return Ok(());
         }
+    };
+    let host = if config.upstream.host.is_empty() {
+        UPSTREAM_URI.to_string()
+    } else {
+        config.upstream.host.clone()
+    };
+    let pipelines = enabled_pipelines(&config.pipelines);
+    if pipelines.is_empty() {
+        warn!("[{}] no pipelines enabled; skipping region", region.name);
+        return Ok(());
+    }
 
     loop {
         // Per-connection phase shared between the connection task and the
@@ -77,13 +77,21 @@ pub async fn run_region(
             .with_light_mode(true)
             .with_channel(cache_tx.clone())
             .on_connect(move |ctx, _id, _tok| {
-                info!("[{}] connected; starting subscriptions", region_name_for_log);
+                info!(
+                    "[{}] connected; starting subscriptions",
+                    region_name_for_log
+                );
                 let phase = phase_for_connect.clone();
                 let region_name = region_name_for_log.clone();
-                queue_subscribe(ctx, &region_name_for_log, pipelines_for_connect.clone(), move || {
-                    info!("[{}] all pipelines live", region_name);
-                    store_phase(&phase, Phase::Live);
-                });
+                queue_subscribe(
+                    ctx,
+                    &region_name_for_log,
+                    pipelines_for_connect.clone(),
+                    move || {
+                        info!("[{}] all pipelines live", region_name);
+                        store_phase(&phase, Phase::Live);
+                    },
+                );
             })
             .on_disconnect(move |_ectx, err| match err {
                 Some(e) => warn!("[{}] disconnected: {:?}", region_name_for_disconnect, e),
@@ -133,4 +141,3 @@ pub async fn run_region(
         }
     }
 }
-

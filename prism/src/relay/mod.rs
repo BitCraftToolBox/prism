@@ -22,9 +22,18 @@ pub fn relay_capacity(_config: &Config) -> usize {
 
 #[derive(Debug, Clone)]
 pub enum RelayMsg {
-    ReplaceResources { region_id: u8, rows: Vec<ResourceRow> },
-    ReplaceEnemies   { region_id: u8, rows: Vec<EnemyRow> },
-    ReplacePlayers   { region_id: u8, rows: Vec<PlayerRow> },
+    ReplaceResources {
+        region_id: u8,
+        rows: Vec<ResourceRow>,
+    },
+    ReplaceEnemies {
+        region_id: u8,
+        rows: Vec<EnemyRow>,
+    },
+    ReplacePlayers {
+        region_id: u8,
+        rows: Vec<PlayerRow>,
+    },
 
     UpsertResource(ResourceRow),
     UpsertEnemy(EnemyRow),
@@ -68,5 +77,3 @@ pub async fn run(
 ) -> Result<()> {
     batcher::run(config, rx, shutdown).await
 }
-
-

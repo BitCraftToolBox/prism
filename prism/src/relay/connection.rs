@@ -7,23 +7,18 @@
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
+use log::{info, warn};
 use relay_bindings::{
-    DbConnection,
+    DbConnection, EnemyLocation, PlayerLocation, ResourceLocation,
     bulk_replace_enemies_reducer::bulk_replace_enemies,
     bulk_replace_players_reducer::bulk_replace_players,
-    bulk_replace_resources_reducer::bulk_replace_resources,
-    delete_enemies_reducer::delete_enemies,
-    delete_players_reducer::delete_players,
-    delete_resources_reducer::delete_resources,
-    init_relay_reducer::init_relay,
-    upsert_enemies_reducer::upsert_enemies,
-    upsert_players_reducer::upsert_players,
-    upsert_resources_reducer::upsert_resources,
-    EnemyLocation, PlayerLocation, ResourceLocation,
+    bulk_replace_resources_reducer::bulk_replace_resources, delete_enemies_reducer::delete_enemies,
+    delete_players_reducer::delete_players, delete_resources_reducer::delete_resources,
+    init_relay_reducer::init_relay, upsert_enemies_reducer::upsert_enemies,
+    upsert_players_reducer::upsert_players, upsert_resources_reducer::upsert_resources,
 };
 use relay_sdk::DbContext;
 use tokio::sync::oneshot;
-use log::{info, warn};
 
 use crate::config::RelayConfig;
 
@@ -70,7 +65,10 @@ impl RelayConnection {
 
                     // init_relay is first-call-wins; errors here are benign.
                     if let Err(e) = c.reducers.init_relay() {
-                        warn!("relay: init_relay call failed (likely already set): {:?}", e);
+                        warn!(
+                            "relay: init_relay call failed (likely already set): {:?}",
+                            e
+                        );
                     }
 
                     let _ = tx.send(Ok((c, pump)));
@@ -81,9 +79,9 @@ impl RelayConnection {
             }
         });
 
-        let (conn, pump) = rx.await
-            .map_err(|_| anyhow!("relay connect task dropped"))?
-            ?;
+        let (conn, pump) = rx
+            .await
+            .map_err(|_| anyhow!("relay connect task dropped"))??;
 
         Ok(Self { conn, pump })
     }
@@ -102,51 +100,83 @@ impl RelayConnection {
         let _ = self.pump.join();
     }
 
-
     // --- Reducer wrappers ---
 
-    pub fn bulk_replace_resources(&self, region_id: u8, rows: Vec<ResourceLocation>, total: u32) -> Result<()> {
-        self.conn.reducers.bulk_replace_resources(region_id, rows, total)
+    pub fn bulk_replace_resources(
+        &self,
+        region_id: u8,
+        rows: Vec<ResourceLocation>,
+        total: u32,
+    ) -> Result<()> {
+        self.conn
+            .reducers
+            .bulk_replace_resources(region_id, rows, total)
             .map_err(|e| anyhow!("{e:?}"))
     }
 
-    pub fn bulk_replace_enemies(&self, region_id: u8, rows: Vec<EnemyLocation>, total: u32) -> Result<()> {
-        self.conn.reducers.bulk_replace_enemies(region_id, rows, total)
+    pub fn bulk_replace_enemies(
+        &self,
+        region_id: u8,
+        rows: Vec<EnemyLocation>,
+        total: u32,
+    ) -> Result<()> {
+        self.conn
+            .reducers
+            .bulk_replace_enemies(region_id, rows, total)
             .map_err(|e| anyhow!("{e:?}"))
     }
 
-    pub fn bulk_replace_players(&self, region_id: u8, rows: Vec<PlayerLocation>, total: u32) -> Result<()> {
-        self.conn.reducers.bulk_replace_players(region_id, rows, total)
+    pub fn bulk_replace_players(
+        &self,
+        region_id: u8,
+        rows: Vec<PlayerLocation>,
+        total: u32,
+    ) -> Result<()> {
+        self.conn
+            .reducers
+            .bulk_replace_players(region_id, rows, total)
             .map_err(|e| anyhow!("{e:?}"))
     }
 
     pub fn upsert_resources(&self, rows: Vec<ResourceLocation>) -> Result<()> {
-        self.conn.reducers.upsert_resources(rows)
+        self.conn
+            .reducers
+            .upsert_resources(rows)
             .map_err(|e| anyhow!("{e:?}"))
     }
 
     pub fn upsert_enemies(&self, rows: Vec<EnemyLocation>) -> Result<()> {
-        self.conn.reducers.upsert_enemies(rows)
+        self.conn
+            .reducers
+            .upsert_enemies(rows)
             .map_err(|e| anyhow!("{e:?}"))
     }
 
     pub fn upsert_players(&self, rows: Vec<PlayerLocation>) -> Result<()> {
-        self.conn.reducers.upsert_players(rows)
+        self.conn
+            .reducers
+            .upsert_players(rows)
             .map_err(|e| anyhow!("{e:?}"))
     }
 
     pub fn delete_resources(&self, ids: Vec<u64>) -> Result<()> {
-        self.conn.reducers.delete_resources(ids)
+        self.conn
+            .reducers
+            .delete_resources(ids)
             .map_err(|e| anyhow!("{e:?}"))
     }
 
     pub fn delete_enemies(&self, ids: Vec<u64>) -> Result<()> {
-        self.conn.reducers.delete_enemies(ids)
+        self.conn
+            .reducers
+            .delete_enemies(ids)
             .map_err(|e| anyhow!("{e:?}"))
     }
 
     pub fn delete_players(&self, ids: Vec<u64>) -> Result<()> {
-        self.conn.reducers.delete_players(ids)
+        self.conn
+            .reducers
+            .delete_players(ids)
             .map_err(|e| anyhow!("{e:?}"))
     }
 }

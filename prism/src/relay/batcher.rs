@@ -18,13 +18,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use log::{debug, error, info, warn};
 use relay_bindings::{EnemyLocation, PlayerLocation, ResourceLocation};
 use tokio::sync::mpsc::Receiver;
 use tokio::time::{Instant, interval_at};
-use log::{debug, error, info, warn};
 
-use super::{EnemyRow, PlayerRow, RelayMsg, ResourceRow};
 use super::connection::{RECONNECT_DELAY, RelayConnection};
+use super::{EnemyRow, PlayerRow, RelayMsg, ResourceRow};
 use crate::config::Config;
 use crate::shutdown::SharedShutdown;
 
@@ -50,13 +50,30 @@ struct Batches {
 }
 
 fn to_resource_location(r: &ResourceRow) -> ResourceLocation {
-    ResourceLocation { entity_id: r.entity_id, resource_id: r.resource_id, region_id: r.region_id, x: r.x, z: r.z }
+    ResourceLocation {
+        entity_id: r.entity_id,
+        resource_id: r.resource_id,
+        region_id: r.region_id,
+        x: r.x,
+        z: r.z,
+    }
 }
 fn to_enemy_location(r: &EnemyRow) -> EnemyLocation {
-    EnemyLocation { entity_id: r.entity_id, enemy_type: r.enemy_type, region_id: r.region_id, x: r.x, z: r.z }
+    EnemyLocation {
+        entity_id: r.entity_id,
+        enemy_type: r.enemy_type,
+        region_id: r.region_id,
+        x: r.x,
+        z: r.z,
+    }
 }
 fn to_player_location(r: &PlayerRow) -> PlayerLocation {
-    PlayerLocation { entity_id: r.entity_id, region_id: r.region_id, x: r.x, z: r.z }
+    PlayerLocation {
+        entity_id: r.entity_id,
+        region_id: r.region_id,
+        x: r.x,
+        z: r.z,
+    }
 }
 
 /// Attempt to connect, retrying with backoff until successful or shutdown.
@@ -119,9 +136,18 @@ pub async fn run(
     tokio::pin!(shutdown_signal);
 
     let now = Instant::now();
-    let mut player_tick   = interval_at(now + Duration::from_millis(PLAYER_FLUSH_MS),   Duration::from_millis(PLAYER_FLUSH_MS));
-    let mut enemy_tick    = interval_at(now + Duration::from_millis(ENEMY_FLUSH_MS),    Duration::from_millis(ENEMY_FLUSH_MS));
-    let mut resource_tick = interval_at(now + Duration::from_millis(RESOURCE_FLUSH_MS), Duration::from_millis(RESOURCE_FLUSH_MS));
+    let mut player_tick = interval_at(
+        now + Duration::from_millis(PLAYER_FLUSH_MS),
+        Duration::from_millis(PLAYER_FLUSH_MS),
+    );
+    let mut enemy_tick = interval_at(
+        now + Duration::from_millis(ENEMY_FLUSH_MS),
+        Duration::from_millis(ENEMY_FLUSH_MS),
+    );
+    let mut resource_tick = interval_at(
+        now + Duration::from_millis(RESOURCE_FLUSH_MS),
+        Duration::from_millis(RESOURCE_FLUSH_MS),
+    );
 
     let mut batches = Batches::default();
 
@@ -228,20 +254,21 @@ pub async fn run(
 
 /// Send a large set of rows as: chunk[0] via `replace_fn` (deletes region
 /// first), chunks[1..] via `upsert_fn` (insert-only).
-fn bulk_replace_chunked<T, FR, FU>(
-    rows: Vec<T>,
-    replace_fn: FR,
-    upsert_fn: FU,
-    kind: &'static str,
-)
+fn bulk_replace_chunked<T, FR, FU>(rows: Vec<T>, replace_fn: FR, upsert_fn: FU, kind: &'static str)
 where
     T: Clone,
     FR: Fn(Vec<T>) -> Result<()>,
     FU: Fn(Vec<T>) -> Result<()>,
 {
-    if rows.is_empty() { return; }
+    if rows.is_empty() {
+        return;
+    }
     let chunks: Vec<&[T]> = rows.chunks(BULK_REPLACE_CHUNK).collect();
-    info!("relay: bulk_replace_{kind} count={} chunks={}", rows.len(), chunks.len());
+    info!(
+        "relay: bulk_replace_{kind} count={} chunks={}",
+        rows.len(),
+        chunks.len()
+    );
     for (i, chunk) in chunks.iter().enumerate() {
         let result = if i == 0 {
             replace_fn(chunk.to_vec())
@@ -258,12 +285,16 @@ fn flush_resource_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.resource_upserts.is_empty() {
         let rows = std::mem::take(&mut batches.resource_upserts);
         debug!("relay flush: upsert_resources count={}", rows.len());
-        if let Err(e) = conn.upsert_resources(rows) { warn!("relay: upsert_resources: {e:?}"); }
+        if let Err(e) = conn.upsert_resources(rows) {
+            warn!("relay: upsert_resources: {e:?}");
+        }
     }
     if !batches.resource_deletes.is_empty() {
         let ids = std::mem::take(&mut batches.resource_deletes);
         debug!("relay flush: delete_resources count={}", ids.len());
-        if let Err(e) = conn.delete_resources(ids) { warn!("relay: delete_resources: {e:?}"); }
+        if let Err(e) = conn.delete_resources(ids) {
+            warn!("relay: delete_resources: {e:?}");
+        }
     }
 }
 
@@ -271,12 +302,16 @@ fn flush_enemy_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.enemy_upserts.is_empty() {
         let rows = std::mem::take(&mut batches.enemy_upserts);
         debug!("relay flush: upsert_enemies count={}", rows.len());
-        if let Err(e) = conn.upsert_enemies(rows) { warn!("relay: upsert_enemies: {e:?}"); }
+        if let Err(e) = conn.upsert_enemies(rows) {
+            warn!("relay: upsert_enemies: {e:?}");
+        }
     }
     if !batches.enemy_deletes.is_empty() {
         let ids = std::mem::take(&mut batches.enemy_deletes);
         debug!("relay flush: delete_enemies count={}", ids.len());
-        if let Err(e) = conn.delete_enemies(ids) { warn!("relay: delete_enemies: {e:?}"); }
+        if let Err(e) = conn.delete_enemies(ids) {
+            warn!("relay: delete_enemies: {e:?}");
+        }
     }
 }
 
@@ -284,11 +319,15 @@ fn flush_player_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.player_upserts.is_empty() {
         let rows = std::mem::take(&mut batches.player_upserts);
         debug!("relay flush: upsert_players count={}", rows.len());
-        if let Err(e) = conn.upsert_players(rows) { warn!("relay: upsert_players: {e:?}"); }
+        if let Err(e) = conn.upsert_players(rows) {
+            warn!("relay: upsert_players: {e:?}");
+        }
     }
     if !batches.player_deletes.is_empty() {
         let ids = std::mem::take(&mut batches.player_deletes);
         debug!("relay flush: delete_players count={}", ids.len());
-        if let Err(e) = conn.delete_players(ids) { warn!("relay: delete_players: {e:?}"); }
+        if let Err(e) = conn.delete_players(ids) {
+            warn!("relay: delete_players: {e:?}");
+        }
     }
 }

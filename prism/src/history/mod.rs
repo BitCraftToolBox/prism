@@ -9,10 +9,10 @@ use std::time::Duration;
 use anyhow::Result;
 use hashbrown::HashMap;
 use log::{debug, error, info, warn};
-use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 use tokio::sync::mpsc::Receiver;
-use tokio::time::{interval_at, Instant};
+use tokio::time::{Instant, interval_at};
 
 use crate::config::Config;
 use crate::shutdown::SharedShutdown;

@@ -18,7 +18,10 @@ pub struct Shutdown {
 
 impl Shutdown {
     pub fn new() -> SharedShutdown {
-        Arc::new(Mutex::new(Self { triggered: false, tx: Vec::new() }))
+        Arc::new(Mutex::new(Self {
+            triggered: false,
+            tx: Vec::new(),
+        }))
     }
 
     /// Register a receiver that fires when shutdown is triggered. Returns
