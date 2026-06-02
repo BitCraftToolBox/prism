@@ -87,9 +87,10 @@ pub fn bulk_replace_resources(
     ctx: &ReducerContext,
     region_id: u8,
     rows: Vec<ResourceLocation>,
+    total: u32
 ) -> Result<(), String> {
     ensure_relay(ctx)?;
-    spacetimedb::log::info!("relay: processing bulk_replace_resources for region {:?}: {:?} rows", region_id, rows.len());
+    spacetimedb::log::info!("relay: processing bulk_replace_resources for region {:?}: {:?}/{:?} rows", region_id, rows.len(), total);
     ctx.db.resource_location().by_region().delete(region_id);
     for row in rows {
         ctx.db.resource_location().insert(row);
@@ -122,9 +123,10 @@ pub fn bulk_replace_enemies(
     ctx: &ReducerContext,
     region_id: u8,
     rows: Vec<EnemyLocation>,
+    total: u32
 ) -> Result<(), String> {
     ensure_relay(ctx)?;
-    spacetimedb::log::info!("relay: processing bulk_replace_enemies for region {:?}: {:?} rows", region_id, rows.len());
+    spacetimedb::log::info!("relay: processing bulk_replace_enemies for region {:?}: {:?}/{:?} rows", region_id, rows.len(), total);
     ctx.db.enemy_location().by_region().delete(region_id);
     for row in rows {
         ctx.db.enemy_location().insert(row);
@@ -157,9 +159,10 @@ pub fn bulk_replace_players(
     ctx: &ReducerContext,
     region_id: u8,
     rows: Vec<PlayerLocation>,
+    total: u32
 ) -> Result<(), String> {
     ensure_relay(ctx)?;
-    spacetimedb::log::info!("relay: processing bulk_replace_players for region {:?}: {:?} rows", region_id, rows.len());
+    spacetimedb::log::info!("relay: processing bulk_replace_players for region {:?}: {:?}/{:?} rows", region_id, rows.len(), total);
     ctx.db.player_location().by_region().delete(region_id);
     for row in rows {
         ctx.db.player_location().insert(row);

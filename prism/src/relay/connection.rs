@@ -105,18 +105,18 @@ impl RelayConnection {
 
     // --- Reducer wrappers ---
 
-    pub fn bulk_replace_resources(&self, region_id: u8, rows: Vec<ResourceLocation>) -> Result<()> {
-        self.conn.reducers.bulk_replace_resources(region_id, rows)
+    pub fn bulk_replace_resources(&self, region_id: u8, rows: Vec<ResourceLocation>, total: u32) -> Result<()> {
+        self.conn.reducers.bulk_replace_resources(region_id, rows, total)
             .map_err(|e| anyhow!("{e:?}"))
     }
 
-    pub fn bulk_replace_enemies(&self, region_id: u8, rows: Vec<EnemyLocation>) -> Result<()> {
-        self.conn.reducers.bulk_replace_enemies(region_id, rows)
+    pub fn bulk_replace_enemies(&self, region_id: u8, rows: Vec<EnemyLocation>, total: u32) -> Result<()> {
+        self.conn.reducers.bulk_replace_enemies(region_id, rows, total)
             .map_err(|e| anyhow!("{e:?}"))
     }
 
-    pub fn bulk_replace_players(&self, region_id: u8, rows: Vec<PlayerLocation>) -> Result<()> {
-        self.conn.reducers.bulk_replace_players(region_id, rows)
+    pub fn bulk_replace_players(&self, region_id: u8, rows: Vec<PlayerLocation>, total: u32) -> Result<()> {
+        self.conn.reducers.bulk_replace_players(region_id, rows, total)
             .map_err(|e| anyhow!("{e:?}"))
     }
 

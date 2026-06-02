@@ -11,6 +11,7 @@ use super::resource_location_type::ResourceLocation;
 pub(super) struct BulkReplaceResourcesArgs {
     pub region_id: u8,
     pub rows: Vec<ResourceLocation>,
+    pub total: u32,
 }
 
 impl From<BulkReplaceResourcesArgs> for super::Reducer {
@@ -18,6 +19,7 @@ impl From<BulkReplaceResourcesArgs> for super::Reducer {
         Self::BulkReplaceResources {
             region_id: args.region_id,
             rows: args.rows,
+            total: args.total,
         }
     }
 }
@@ -41,8 +43,9 @@ pub trait bulk_replace_resources {
         &self,
         region_id: u8,
         rows: Vec<ResourceLocation>,
+        total: u32,
     ) -> __sdk::Result<()> {
-        self.bulk_replace_resources_then(region_id, rows, |_, _| {})
+        self.bulk_replace_resources_then(region_id, rows, total, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `bulk_replace_resources` to run as soon as possible,
@@ -55,6 +58,7 @@ pub trait bulk_replace_resources {
         &self,
         region_id: u8,
         rows: Vec<ResourceLocation>,
+        total: u32,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -67,12 +71,19 @@ impl bulk_replace_resources for super::RemoteReducers {
         &self,
         region_id: u8,
         rows: Vec<ResourceLocation>,
+        total: u32,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp
-            .invoke_reducer_with_callback(BulkReplaceResourcesArgs { region_id, rows }, callback)
+        self.imp.invoke_reducer_with_callback(
+            BulkReplaceResourcesArgs {
+                region_id,
+                rows,
+                total,
+            },
+            callback,
+        )
     }
 }

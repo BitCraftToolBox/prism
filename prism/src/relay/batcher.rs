@@ -149,7 +149,7 @@ pub async fn run(
                         let relay_rows: Vec<ResourceLocation> = rows.iter().map(to_resource_location).collect();
                         bulk_replace_chunked(
                             relay_rows,
-                            |chunk| conn.bulk_replace_resources(region_id, chunk),
+                            |chunk| conn.bulk_replace_resources(region_id, chunk, rows.len() as u32),
                             |chunk| conn.upsert_resources(chunk),
                             "resources",
                         );
@@ -159,7 +159,7 @@ pub async fn run(
                         let relay_rows: Vec<EnemyLocation> = rows.iter().map(to_enemy_location).collect();
                         bulk_replace_chunked(
                             relay_rows,
-                            |chunk| conn.bulk_replace_enemies(region_id, chunk),
+                            |chunk| conn.bulk_replace_enemies(region_id, chunk, rows.len() as u32),
                             |chunk| conn.upsert_enemies(chunk),
                             "enemies",
                         );
@@ -169,7 +169,7 @@ pub async fn run(
                         let relay_rows: Vec<PlayerLocation> = rows.iter().map(to_player_location).collect();
                         bulk_replace_chunked(
                             relay_rows,
-                            |chunk| conn.bulk_replace_players(region_id, chunk),
+                            |chunk| conn.bulk_replace_players(region_id, chunk, rows.len() as u32),
                             |chunk| conn.upsert_players(chunk),
                             "players",
                         );

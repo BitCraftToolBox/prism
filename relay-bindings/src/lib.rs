@@ -53,14 +53,17 @@ pub enum Reducer {
     BulkReplaceEnemies {
         region_id: u8,
         rows: Vec<EnemyLocation>,
+        total: u32,
     },
     BulkReplacePlayers {
         region_id: u8,
         rows: Vec<PlayerLocation>,
+        total: u32,
     },
     BulkReplaceResources {
         region_id: u8,
         rows: Vec<ResourceLocation>,
+        total: u32,
     },
     DeleteEnemies {
         entity_ids: Vec<u64>,
@@ -106,24 +109,33 @@ impl __sdk::Reducer for Reducer {
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
-            Reducer::BulkReplaceEnemies { region_id, rows } => {
-                __sats::bsatn::to_vec(&bulk_replace_enemies_reducer::BulkReplaceEnemiesArgs {
-                    region_id: region_id.clone(),
-                    rows: rows.clone(),
-                })
-            }
-            Reducer::BulkReplacePlayers { region_id, rows } => {
-                __sats::bsatn::to_vec(&bulk_replace_players_reducer::BulkReplacePlayersArgs {
-                    region_id: region_id.clone(),
-                    rows: rows.clone(),
-                })
-            }
-            Reducer::BulkReplaceResources { region_id, rows } => {
-                __sats::bsatn::to_vec(&bulk_replace_resources_reducer::BulkReplaceResourcesArgs {
-                    region_id: region_id.clone(),
-                    rows: rows.clone(),
-                })
-            }
+            Reducer::BulkReplaceEnemies {
+                region_id,
+                rows,
+                total,
+            } => __sats::bsatn::to_vec(&bulk_replace_enemies_reducer::BulkReplaceEnemiesArgs {
+                region_id: region_id.clone(),
+                rows: rows.clone(),
+                total: total.clone(),
+            }),
+            Reducer::BulkReplacePlayers {
+                region_id,
+                rows,
+                total,
+            } => __sats::bsatn::to_vec(&bulk_replace_players_reducer::BulkReplacePlayersArgs {
+                region_id: region_id.clone(),
+                rows: rows.clone(),
+                total: total.clone(),
+            }),
+            Reducer::BulkReplaceResources {
+                region_id,
+                rows,
+                total,
+            } => __sats::bsatn::to_vec(&bulk_replace_resources_reducer::BulkReplaceResourcesArgs {
+                region_id: region_id.clone(),
+                rows: rows.clone(),
+                total: total.clone(),
+            }),
             Reducer::DeleteEnemies { entity_ids } => {
                 __sats::bsatn::to_vec(&delete_enemies_reducer::DeleteEnemiesArgs {
                     entity_ids: entity_ids.clone(),

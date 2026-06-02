@@ -11,6 +11,7 @@ use super::enemy_location_type::EnemyLocation;
 pub(super) struct BulkReplaceEnemiesArgs {
     pub region_id: u8,
     pub rows: Vec<EnemyLocation>,
+    pub total: u32,
 }
 
 impl From<BulkReplaceEnemiesArgs> for super::Reducer {
@@ -18,6 +19,7 @@ impl From<BulkReplaceEnemiesArgs> for super::Reducer {
         Self::BulkReplaceEnemies {
             region_id: args.region_id,
             rows: args.rows,
+            total: args.total,
         }
     }
 }
@@ -37,8 +39,13 @@ pub trait bulk_replace_enemies {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`bulk_replace_enemies:bulk_replace_enemies_then`] to run a callback after the reducer completes.
-    fn bulk_replace_enemies(&self, region_id: u8, rows: Vec<EnemyLocation>) -> __sdk::Result<()> {
-        self.bulk_replace_enemies_then(region_id, rows, |_, _| {})
+    fn bulk_replace_enemies(
+        &self,
+        region_id: u8,
+        rows: Vec<EnemyLocation>,
+        total: u32,
+    ) -> __sdk::Result<()> {
+        self.bulk_replace_enemies_then(region_id, rows, total, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `bulk_replace_enemies` to run as soon as possible,
@@ -51,6 +58,7 @@ pub trait bulk_replace_enemies {
         &self,
         region_id: u8,
         rows: Vec<EnemyLocation>,
+        total: u32,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -63,12 +71,19 @@ impl bulk_replace_enemies for super::RemoteReducers {
         &self,
         region_id: u8,
         rows: Vec<EnemyLocation>,
+        total: u32,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp
-            .invoke_reducer_with_callback(BulkReplaceEnemiesArgs { region_id, rows }, callback)
+        self.imp.invoke_reducer_with_callback(
+            BulkReplaceEnemiesArgs {
+                region_id,
+                rows,
+                total,
+            },
+            callback,
+        )
     }
 }

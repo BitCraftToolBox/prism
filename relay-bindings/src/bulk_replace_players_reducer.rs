@@ -11,6 +11,7 @@ use super::player_location_type::PlayerLocation;
 pub(super) struct BulkReplacePlayersArgs {
     pub region_id: u8,
     pub rows: Vec<PlayerLocation>,
+    pub total: u32,
 }
 
 impl From<BulkReplacePlayersArgs> for super::Reducer {
@@ -18,6 +19,7 @@ impl From<BulkReplacePlayersArgs> for super::Reducer {
         Self::BulkReplacePlayers {
             region_id: args.region_id,
             rows: args.rows,
+            total: args.total,
         }
     }
 }
@@ -37,8 +39,13 @@ pub trait bulk_replace_players {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`bulk_replace_players:bulk_replace_players_then`] to run a callback after the reducer completes.
-    fn bulk_replace_players(&self, region_id: u8, rows: Vec<PlayerLocation>) -> __sdk::Result<()> {
-        self.bulk_replace_players_then(region_id, rows, |_, _| {})
+    fn bulk_replace_players(
+        &self,
+        region_id: u8,
+        rows: Vec<PlayerLocation>,
+        total: u32,
+    ) -> __sdk::Result<()> {
+        self.bulk_replace_players_then(region_id, rows, total, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `bulk_replace_players` to run as soon as possible,
@@ -51,6 +58,7 @@ pub trait bulk_replace_players {
         &self,
         region_id: u8,
         rows: Vec<PlayerLocation>,
+        total: u32,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -63,12 +71,19 @@ impl bulk_replace_players for super::RemoteReducers {
         &self,
         region_id: u8,
         rows: Vec<PlayerLocation>,
+        total: u32,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp
-            .invoke_reducer_with_callback(BulkReplacePlayersArgs { region_id, rows }, callback)
+        self.imp.invoke_reducer_with_callback(
+            BulkReplacePlayersArgs {
+                region_id,
+                rows,
+                total,
+            },
+            callback,
+        )
     }
 }
