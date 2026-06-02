@@ -180,38 +180,26 @@ fn emit_deltas(
         resource_deletes.push(e.row.entity_id);
     }
 
-    // Resource upserts: when resource_state or location_state arrives in this
-    // batch we can now emit because the other leg is already in the maps.
+    // Resource inserts: only when both resource_state and location_state arrive
+    // in the same update (guaranteed by transaction boundaries).
+    // There's a currently-impossible edge case where a resource actually changes direction
+    // or type (e.g. a real update, not a lone insert), but even if the game changes
+    // to make that possible, we handle this as a delete + insert.
     for e in &update.resource_state.inserts {
-        if let Some(loc) = region.last_location.get(&e.row.entity_id)
-            && loc.dimension == OVERWORLD_DIM
+        if let Some(loc) = update
+            .location_state
+            .inserts
+            .iter()
+            .find(|l| l.row.entity_id == e.row.entity_id)
+            && loc.row.dimension == OVERWORLD_DIM
         {
             resource_upserts.push(ResourceRow {
                 entity_id: e.row.entity_id,
                 resource_id: e.row.resource_id,
                 region_id,
-                x: loc.x,
-                z: loc.z,
+                x: loc.row.x,
+                z: loc.row.z,
             });
-        }
-    }
-    for e in &update.location_state.inserts {
-        if let Some(&res_id) = region.resource_kind.get(&e.row.entity_id) {
-            if resource_upserts
-                .iter()
-                .any(|r| r.entity_id == e.row.entity_id)
-            {
-                continue;
-            }
-            if e.row.dimension == OVERWORLD_DIM {
-                resource_upserts.push(ResourceRow {
-                    entity_id: e.row.entity_id,
-                    resource_id: res_id,
-                    region_id,
-                    x: e.row.x,
-                    z: e.row.z,
-                });
-            }
         }
     }
 
@@ -257,15 +245,11 @@ fn emit_deltas(
 
     send_relay(
         &sinks.relay_tx,
-        resource_upserts.into_iter().map(RelayMsg::UpsertResource),
-    );
-    send_relay(
-        &sinks.relay_tx,
         resource_deletes.into_iter().map(RelayMsg::DeleteResource),
     );
     send_relay(
         &sinks.relay_tx,
-        enemy_upserts.into_iter().map(RelayMsg::UpsertEnemy),
+        resource_upserts.into_iter().map(RelayMsg::UpsertResource),
     );
     send_relay(
         &sinks.relay_tx,
@@ -273,11 +257,15 @@ fn emit_deltas(
     );
     send_relay(
         &sinks.relay_tx,
-        player_upserts.into_iter().map(RelayMsg::UpsertPlayer),
+        enemy_upserts.into_iter().map(RelayMsg::UpsertEnemy),
     );
     send_relay(
         &sinks.relay_tx,
         player_deletes.into_iter().map(RelayMsg::DeletePlayer),
+    );
+    send_relay(
+        &sinks.relay_tx,
+        player_upserts.into_iter().map(RelayMsg::UpsertPlayer),
     );
     for msg in history_msgs {
         if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = sinks.history_tx.try_send(msg)
