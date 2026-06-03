@@ -11,7 +11,7 @@ upstream_bindings = { package = "bindings", git = "https://github.com/BitCraftTo
 # Downstream: generated client bindings for our relay module (uses standard SDK 2.x).
 relay_bindings = { path = "../relay-bindings" }
 # Standard SDK 2.x re-exported for trait imports (DbContext) used by relay connection.
-relay_sdk = { package = "spacetimedb-sdk", version = "2.3.0" }
+relay_sdk = { package = "spacetimedb-sdk", version = "2.4.0" }
 
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }

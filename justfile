@@ -16,11 +16,11 @@ publish-prod module="prism-relay" host="https://maincloud.spacetimedb.com":
 
 # Regenerate Rust client bindings into relay-bindings/src.
 generate-bindings:
-    rm -rf relay-bindings/src
-    mkdir -p relay-bindings/src
-    spacetime generate --lang rust --out-dir relay-bindings/src --module-path relay-module
-    # spacetime generate produces mod.rs; Cargo needs lib.rs as the crate root.
+    spacetime generate -y --lang rust --out-dir relay-bindings/src --module-path relay-module
     mv relay-bindings/src/mod.rs relay-bindings/src/lib.rs
+
+generate-map path="../bitcraftmap/src/relay-bindings":
+    spacetime generate -y --lang ts --out-dir {{path}} --module-path relay-module
 
 # --- prism workspace ---
 

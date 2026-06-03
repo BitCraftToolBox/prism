@@ -34,14 +34,20 @@ pub enum RelayMsg {
         region_id: u8,
         rows: Vec<PlayerRow>,
     },
+    ReplacePlayerStates {
+        region_id: u8,
+        rows: Vec<PlayerStateRow>,
+    },
 
     UpsertResource(ResourceRow),
     UpsertEnemy(EnemyRow),
     UpsertPlayer(PlayerRow),
+    UpsertPlayerState(PlayerStateRow),
 
     DeleteResource(u64),
     DeleteEnemy(u64),
     DeletePlayer(u64),
+    DeletePlayerState(u64),
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +74,14 @@ pub struct PlayerRow {
     pub region_id: u8,
     pub x: i32,
     pub z: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlayerStateRow {
+    pub entity_id: u64,
+    pub region_id: u8,
+    pub online: bool,
+    pub name: String,
 }
 
 pub async fn run(

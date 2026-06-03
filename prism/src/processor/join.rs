@@ -6,8 +6,8 @@
 //! resource_state, mobile_entity vs. enemy_state, ...). These maps are
 //! maintained across update batches, mirroring nodeindex's `consume()`.
 
-use crate::relay::{EnemyRow, PlayerRow, ResourceRow};
-use hashbrown::HashMap;
+use crate::relay::{EnemyRow, PlayerRow, PlayerStateRow, ResourceRow};
+use hashbrown::{HashMap, HashSet};
 
 #[derive(Default)]
 pub struct JoinState {
@@ -20,13 +20,15 @@ pub struct RegionJoinState {
     pub resource_kind: HashMap<u64, i32>,
     /// entity_id → enemy_type
     pub enemy_kind: HashMap<u64, i32>,
-    /// entity_id → (is a known player?)
-    pub player: HashMap<u64, ()>,
-    /// last known location for an entity, regardless of kind.
+    /// entity_id → username (all players with a known username in this region)
+    pub player_username: HashMap<u64, String>,
+    /// set of entity_ids currently signed in (online)
+    pub player_signed_in: HashSet<u64>,
+    /// Last known location per entity — only maintained during the Syncing
+    /// phase for snapshot building; cleared immediately after the bulk snapshot
+    /// is emitted so it doesn't grow unboundedly in delta mode.
     pub last_location: HashMap<u64, EntityLocation>,
     /// False during initial subscription sync; true once all pipelines are live.
-    /// While false, updates update join maps but are NOT emitted to sinks —
-    /// we wait until the first Live update to emit a coherent bulk snapshot.
     pub is_live: bool,
 }
 
@@ -82,7 +84,7 @@ impl RegionJoinState {
 
     /// Collect all known overworld players as relay rows for a bulk replace.
     pub fn snapshot_players(&self, region_id: u8) -> Vec<PlayerRow> {
-        self.player
+        self.player_username
             .keys()
             .filter_map(|&eid| {
                 let loc = self.last_location.get(&eid)?;
@@ -97,6 +99,26 @@ impl RegionJoinState {
                 })
             })
             .collect()
+    }
+
+    /// Collect all known player states as relay rows for a bulk replace.
+    /// Does not require last_location — derives online status from player_signed_in.
+    pub fn snapshot_player_states(&self, region_id: u8) -> Vec<PlayerStateRow> {
+        self.player_username
+            .iter()
+            .map(|(&eid, name)| PlayerStateRow {
+                entity_id: eid,
+                region_id,
+                online: self.player_signed_in.contains(&eid),
+                name: name.clone(),
+            })
+            .collect()
+    }
+
+    /// Drop the last-location cache — called once the snapshot has been emitted
+    /// so delta mode doesn't maintain stale per-entity location history.
+    pub fn clear_last_location(&mut self) {
+        self.last_location.clear();
     }
 }
 

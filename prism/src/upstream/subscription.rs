@@ -45,8 +45,9 @@ impl Pipeline {
                 "SELECT * FROM mobile_entity_state;".into(),
             ],
             Pipeline::Players => vec![
-                "SELECT * FROM player_state;".into(),
                 "SELECT * FROM mobile_entity_state;".into(),
+                "SELECT * FROM player_username_state;".into(),
+                "SELECT * FROM signed_in_player_state;".into(),
             ],
         }
     }

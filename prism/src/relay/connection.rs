@@ -9,12 +9,14 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use log::{info, warn};
 use relay_bindings::{
-    DbConnection, EnemyLocation, PlayerLocation, ResourceLocation,
+    DbConnection, EnemyLocation, PlayerLocation, PlayerState, ResourceLocation,
     bulk_replace_enemies_reducer::bulk_replace_enemies,
+    bulk_replace_player_states_reducer::bulk_replace_player_states,
     bulk_replace_players_reducer::bulk_replace_players,
     bulk_replace_resources_reducer::bulk_replace_resources, delete_enemies_reducer::delete_enemies,
-    delete_players_reducer::delete_players, delete_resources_reducer::delete_resources,
-    init_relay_reducer::init_relay, upsert_enemies_reducer::upsert_enemies,
+    delete_player_states_reducer::delete_player_states, delete_players_reducer::delete_players,
+    delete_resources_reducer::delete_resources, init_relay_reducer::init_relay,
+    upsert_enemies_reducer::upsert_enemies, upsert_player_states_reducer::upsert_player_states,
     upsert_players_reducer::upsert_players, upsert_resources_reducer::upsert_resources,
 };
 use relay_sdk::DbContext;
@@ -177,6 +179,32 @@ impl RelayConnection {
         self.conn
             .reducers
             .delete_players(ids)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn bulk_replace_player_states(
+        &self,
+        region_id: u8,
+        rows: Vec<PlayerState>,
+        total: u32,
+    ) -> Result<()> {
+        self.conn
+            .reducers
+            .bulk_replace_player_states(region_id, rows, total)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn upsert_player_states(&self, rows: Vec<PlayerState>) -> Result<()> {
+        self.conn
+            .reducers
+            .upsert_player_states(rows)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn delete_player_states(&self, ids: Vec<u64>) -> Result<()> {
+        self.conn
+            .reducers
+            .delete_player_states(ids)
             .map_err(|e| anyhow!("{e:?}"))
     }
 }

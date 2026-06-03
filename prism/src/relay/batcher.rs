@@ -4,7 +4,7 @@
 //! Replace* messages flush immediately (in chunks to stay under the 32MB
 //! WebSocket limit). Deletes are batched with their respective pipeline.
 //!
-//! # Reconnect behaviour
+//! # Reconnect behavior
 //! Before every flush-tick (players, enemies, resources) the batcher calls
 //! `ensure_connected`, which checks `conn.is_active()` and, if the connection
 //! has gone away, waits `RECONNECT_DELAY` and reconnects. Any upsert/delete
@@ -19,12 +19,12 @@ use std::time::Duration;
 
 use anyhow::Result;
 use log::{debug, error, info, warn};
-use relay_bindings::{EnemyLocation, PlayerLocation, ResourceLocation};
+use relay_bindings::{EnemyLocation, PlayerLocation, PlayerState, ResourceLocation};
 use tokio::sync::mpsc::Receiver;
 use tokio::time::{Instant, interval_at};
 
 use super::connection::{RECONNECT_DELAY, RelayConnection};
-use super::{EnemyRow, PlayerRow, RelayMsg, ResourceRow};
+use super::{EnemyRow, PlayerRow, PlayerStateRow, RelayMsg, ResourceRow};
 use crate::config::Config;
 use crate::shutdown::SharedShutdown;
 
@@ -47,6 +47,8 @@ struct Batches {
     enemy_deletes: Vec<u64>,
     player_upserts: Vec<PlayerLocation>,
     player_deletes: Vec<u64>,
+    player_state_upserts: Vec<PlayerState>,
+    player_state_deletes: Vec<u64>,
 }
 
 fn to_resource_location(r: &ResourceRow) -> ResourceLocation {
@@ -73,6 +75,14 @@ fn to_player_location(r: &PlayerRow) -> PlayerLocation {
         region_id: r.region_id,
         x: r.x,
         z: r.z,
+    }
+}
+fn to_player_state(r: &PlayerStateRow) -> PlayerState {
+    PlayerState {
+        entity_id: r.entity_id,
+        region_id: r.region_id,
+        online: r.online,
+        name: r.name.clone(),
     }
 }
 
@@ -200,6 +210,16 @@ pub async fn run(
                             "players",
                         );
                     }
+                    RelayMsg::ReplacePlayerStates { region_id, rows } => {
+                        flush_player_state_batch(&conn, &mut batches);
+                        let relay_rows: Vec<PlayerState> = rows.iter().map(to_player_state).collect();
+                        bulk_replace_chunked(
+                            relay_rows,
+                            |chunk| conn.bulk_replace_player_states(region_id, chunk, rows.len() as u32),
+                            |chunk| conn.upsert_player_states(chunk),
+                            "player_states",
+                        );
+                    }
                     RelayMsg::UpsertResource(row) => {
                         batches.resource_upserts.push(to_resource_location(&row));
                         if batches.resource_upserts.len() >= MAX_BATCH { flush_resource_batch(&conn, &mut batches); }
@@ -224,12 +244,21 @@ pub async fn run(
                         batches.player_deletes.push(id);
                         if batches.player_deletes.len() >= MAX_BATCH { flush_player_batch(&conn, &mut batches); }
                     }
+                    RelayMsg::UpsertPlayerState(row) => {
+                        batches.player_state_upserts.push(to_player_state(&row));
+                        if batches.player_state_upserts.len() >= MAX_BATCH { flush_player_state_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::DeletePlayerState(id) => {
+                        batches.player_state_deletes.push(id);
+                        if batches.player_state_deletes.len() >= MAX_BATCH { flush_player_state_batch(&conn, &mut batches); }
+                    }
                 }
             }
 
             _ = player_tick.tick() => {
                 if !ensure_connected(&mut conn, &config, &shutdown).await { break; }
                 flush_player_batch(&conn, &mut batches);
+                flush_player_state_batch(&conn, &mut batches);
             }
             _ = enemy_tick.tick() => {
                 if !ensure_connected(&mut conn, &config, &shutdown).await { break; }
@@ -246,6 +275,7 @@ pub async fn run(
     flush_resource_batch(&conn, &mut batches);
     flush_enemy_batch(&conn, &mut batches);
     flush_player_batch(&conn, &mut batches);
+    flush_player_state_batch(&conn, &mut batches);
     info!("relay batcher: disconnecting...");
     conn.disconnect();
     info!("relay batcher: exited");
@@ -328,6 +358,23 @@ fn flush_player_batch(conn: &RelayConnection, batches: &mut Batches) {
         debug!("relay flush: delete_players count={}", ids.len());
         if let Err(e) = conn.delete_players(ids) {
             warn!("relay: delete_players: {e:?}");
+        }
+    }
+}
+
+fn flush_player_state_batch(conn: &RelayConnection, batches: &mut Batches) {
+    if !batches.player_state_upserts.is_empty() {
+        let rows = std::mem::take(&mut batches.player_state_upserts);
+        debug!("relay flush: upsert_player_states count={}", rows.len());
+        if let Err(e) = conn.upsert_player_states(rows) {
+            warn!("relay: upsert_player_states: {e:?}");
+        }
+    }
+    if !batches.player_state_deletes.is_empty() {
+        let ids = std::mem::take(&mut batches.player_state_deletes);
+        debug!("relay flush: delete_player_states count={}", ids.len());
+        if let Err(e) = conn.delete_player_states(ids) {
+            warn!("relay: delete_player_states: {e:?}");
         }
     }
 }
