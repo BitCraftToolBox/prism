@@ -270,60 +270,65 @@ fn players(ctx: &mut HandlerContext, request: Request) -> Response {
 
     let body = if let Some(q) = query {
         let q_lower = q.to_lowercase();
-        ctx.with_tx(|tx| {
-            let mut rows: Vec<_> = tx
-                .db
+        let mut rows: Vec<_> = ctx.with_tx(|tx| {
+            tx.db
                 .player_state()
                 .iter()
                 .filter(|p| p.name.to_lowercase().contains(&q_lower))
-                .collect();
+                .collect()
+        });
 
-            rows.sort_by(|a, b| {
-                let a_lower = a.name.to_lowercase();
-                let b_lower = b.name.to_lowercase();
+        rows.sort_by(|a, b| {
+            let a_lower = a.name.to_lowercase();
+            let b_lower = b.name.to_lowercase();
 
-                let a_exact = a_lower == q_lower;
-                let b_exact = b_lower == q_lower;
+            let a_exact = a_lower == q_lower;
+            let b_exact = b_lower == q_lower;
 
-                if a_exact != b_exact {
-                    return if a_exact {
-                        std::cmp::Ordering::Less
-                    } else {
-                        std::cmp::Ordering::Greater
-                    };
-                }
+            if a_exact != b_exact {
+                return if a_exact {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Greater
+                };
+            }
 
-                let a_starts = a_lower.starts_with(&q_lower);
-                let b_starts = b_lower.starts_with(&q_lower);
+            let a_starts = a_lower.starts_with(&q_lower);
+            let b_starts = b_lower.starts_with(&q_lower);
 
-                if a_starts != b_starts {
-                    return if a_starts {
-                        std::cmp::Ordering::Less
-                    } else {
-                        std::cmp::Ordering::Greater
-                    };
-                }
+            if a_starts != b_starts {
+                return if a_starts {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Greater
+                };
+            }
 
-                std::cmp::Ordering::Equal
-            });
+            std::cmp::Ordering::Equal
+        });
 
-            let results: Vec<_> = rows
-                .into_iter()
-                .map(|p| serde_json::json!({
+        let results: Vec<_> = rows
+            .into_iter()
+            .map(|p| {
+                serde_json::json!({
                     "entityId": p.entity_id.to_string(),
                     "username": p.name,
                     "signedIn": p.online
-                }))
-                .collect();
+                })
+            })
+            .collect();
 
-            serde_json::to_vec(&results).ok()
-        })
+        serde_json::to_vec(&results).ok()
     } else {
         Some(vec![])
     };
 
     if let Some(body) = body {
-        Response::builder().status(200).header("Content-Type", "application/json").body(Body::from_bytes(body)).unwrap()
+        Response::builder()
+            .status(200)
+            .header("Content-Type", "application/json")
+            .body(Body::from_bytes(body))
+            .unwrap()
     } else {
         Response::builder().status(404).body(Body::empty()).unwrap()
     }
