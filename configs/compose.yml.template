@@ -1,0 +1,15 @@
+x-common: &common
+  image: prism
+  depends_on:
+    timescaledb:
+      condition: service_healthy
+    spacetimedb:
+      condition: service_started
+  env_file: "config/prism/env"
+
+services:$SERVICE$
+  prism-$GROUP$:
+    container_name: $NAME$
+    volumes:
+      - ./config/prism/prism-$GROUP$.toml:/etc/prism/config.toml:ro
+    <<: *common

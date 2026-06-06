@@ -1,6 +1,6 @@
 [[upstream.regions.dumps]]
 # map renderer - daily
-schedule = "0 5 4 * * *"
+schedule = "30 $OFFSET$ 4 * * *"
 tables = [
     { name = "terrain_chunk_state" },
     { name = "world_region_state" }
@@ -8,7 +8,7 @@ tables = [
 
 [[upstream.regions.dumps]]
 # road renderer - hourly
-schedule = "0 35 * * * *"
+schedule = "30 $OFFSET2$ * * * *"
 tables = [
     { name = "paved_tile_state" },
     { name = "location_state", output_file = "road_locations", query = "SELECT loc.* FROM paved_tile_state pts JOIN location_state loc ON pts.entity_id = loc.entity_id;" },
@@ -32,4 +32,6 @@ tables = [
     { name = "empire_state", output_folder = "global" },
     { name = "empire_chunk_state", output_folder = "global" },
     { name = "empire_emblem_state", output_folder = "global" },
+    { name = "biome_desc", output_folder = "global" },
+    { name = "paving_tile_desc", output_folder = "global" },
 ]
