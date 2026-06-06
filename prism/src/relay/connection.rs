@@ -42,7 +42,7 @@ impl RelayConnection {
 
         let uri = cfg.uri.clone();
         let module = cfg.module.clone();
-        let token = cfg.token.clone();
+        let token = cfg.token.clone().expect("Relay token missing, should have been validated in config.");
 
         // build() establishes the WebSocket synchronously; run in a blocking
         // thread so we don't stall the tokio executor.

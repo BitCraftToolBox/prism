@@ -9,6 +9,7 @@ use serde::Deserialize;
 pub struct Config {
     pub upstream: UpstreamConfig,
     pub relay: RelayConfig,
+    #[serde(default)]
     pub database: DatabaseConfig,
     #[serde(default)]
     pub pipelines: PipelinesConfig,
@@ -89,12 +90,20 @@ pub struct DumpTableConfig {
 pub struct RelayConfig {
     pub uri: String,
     pub module: String,
-    pub token: String,
+    #[serde(default)]
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DatabaseConfig {
-    pub url: String,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self { url: None }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -147,10 +156,10 @@ impl Config {
             self.upstream.default_token = Some(t);
         }
         if let Ok(t) = std::env::var("PRISM_RELAY_TOKEN") {
-            self.relay.token = t;
+            self.relay.token = Some(t);
         }
         if let Ok(u) = std::env::var("DATABASE_URL") {
-            self.database.url = u;
+            self.database.url = Some(u);
         }
     }
 
@@ -165,6 +174,12 @@ impl Config {
                     r.name
                 ));
             }
+        }
+        if self.relay.token.is_none() {
+            return Err(anyhow!("relay has no token; use config.toml or PRISM_RELAY_TOKEN env var"));
+        }
+        if self.database.url.is_none() {
+            return Err(anyhow!("database URL is not set; use config.toml or DATABASE_URL env var"));
         }
         Ok(())
     }

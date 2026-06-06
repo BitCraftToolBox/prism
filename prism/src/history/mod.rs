@@ -39,14 +39,14 @@ pub async fn run(
     mut rx: Receiver<HistoryMsg>,
     shutdown: SharedShutdown,
 ) -> Result<()> {
-    if config.database.url.is_empty() {
+    let Some(url) = &config.database.url else {
         info!("Database not configured, history will not be stored.");
         return Ok(());
-    }
+    };
     info!("history: connecting to database...");
     let pool = PgPoolOptions::new()
         .max_connections(4)
-        .connect(&config.database.url)
+        .connect(url.as_str())
         .await?;
     info!("history: connected, running migrations");
 
