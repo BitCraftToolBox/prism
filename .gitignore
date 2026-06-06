@@ -2,3 +2,5 @@
 /relay-module/target
 /config.toml
 .env
+
+dumps/

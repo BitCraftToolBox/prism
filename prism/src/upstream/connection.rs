@@ -1,28 +1,37 @@
 //! Per-region connection lifecycle: connect → subscribe → forward updates →
 //! reconnect on error → exit cleanly on shutdown.
 
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 use std::time::Duration;
 
 use anyhow::Result;
-use log::{error, info, warn};
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use chrono::Utc;
+use cron::Schedule;
+use log::{debug, error, info, warn};
+use tokio::sync::mpsc::{Sender, UnboundedSender, unbounded_channel};
 use upstream_bindings::ext::ctx::RunUntil;
 use upstream_bindings::region::{DbConnection, DbUpdate};
+use upstream_bindings::sdk::DbContext;
 
 use super::subscription::{enabled_pipelines, queue_subscribe};
 use super::{Phase, RegionUpdate, SharedPhase, load_phase, store_phase};
-use crate::config::{Config, RegionConfig};
+use crate::config::{Config, DumpScheduleConfig, RegionConfig};
+use crate::dumper::{DumpMsg, table_extract};
+use crate::dumper::table_extract::SupportedTable;
 use crate::shutdown::SharedShutdown;
 
 const UPSTREAM_URI: &str = "https://bitcraft-early-access.spacetimedb.com";
 const RECONNECT_BACKOFF: Duration = Duration::from_secs(5);
+/// Maximum time to wait for a dump subscription to deliver rows.
+const DUMP_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub async fn run_region(
     config: Arc<Config>,
     region: RegionConfig,
     proc_tx: UnboundedSender<RegionUpdate>,
+    dump_tx: Sender<DumpMsg>,
     shutdown: SharedShutdown,
 ) -> Result<()> {
     let token = match config.token_for(&region) {
@@ -37,6 +46,20 @@ pub async fn run_region(
     } else {
         config.upstream.host.clone()
     };
+    // Spawn one persistent dump-schedule task per schedule entry.  Each task
+    // creates its own short-lived connection when the interval fires so that
+    // dump subscriptions are completely independent of the main connection.
+    for cfg in config.dumps_for(&region) {
+        tokio::spawn(run_dump_schedule(
+            host.clone(),
+            region.name.clone(),
+            token.clone(),
+            cfg.clone(),
+            dump_tx.clone(),
+            shutdown.clone(),
+        ));
+    }
+
     let pipelines = enabled_pipelines(&config.pipelines);
     if pipelines.is_empty() {
         warn!("[{}] no pipelines enabled; skipping region", region.name);
@@ -139,5 +162,189 @@ pub async fn run_region(
             _ = signal => return Ok(()),
             _ = tokio::time::sleep(RECONNECT_BACKOFF) => {}
         }
+    }
+}
+
+/// Runs indefinitely on a timer.  Each interval it opens a fresh, short-lived
+/// upstream connection, subscribes to the configured tables, waits for the
+/// initial rows to arrive, serializes them and forwards to the dumper.
+async fn run_dump_schedule(
+    host: String,
+    module_name: String,
+    token: String,
+    cfg: DumpScheduleConfig,
+    dump_tx: Sender<DumpMsg>,
+    shutdown: SharedShutdown,
+) {
+    let schedule = match Schedule::from_str(&cfg.schedule) {
+        Ok(s) => s,
+        Err(e) => {
+            error!(
+                "[{}] dump: invalid cron expression {:?}: {}",
+                module_name, cfg.schedule, e
+            );
+            return;
+        }
+    };
+
+    // Validate configured tables against the supported set upfront, so we fail
+    // fast rather than silently producing no output every run.
+    let tables: Vec<(SupportedTable, &crate::config::DumpTableConfig)> = cfg
+        .tables
+        .iter()
+        .filter_map(|t| match SupportedTable::from_name(&t.name) {
+            Some(supported) => Some((supported, t)),
+            None => {
+                warn!(
+                    "[{}] dump: table {:?} is not supported and will be skipped. \
+                     Supported tables: {:?}",
+                    module_name,
+                    t.name,
+                    SupportedTable::ALL
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                );
+                None
+            }
+        })
+        .collect();
+
+    if tables.is_empty() {
+        warn!(
+            "[{}] dump: no supported tables configured for schedule {:?}; task exiting",
+            module_name, cfg.schedule
+        );
+        return;
+    }
+
+    let Some(shutdown_signal) = shutdown.lock().await.register() else {
+        return;
+    };
+    tokio::pin!(shutdown_signal);
+
+    loop {
+        // Compute sleep duration until the next scheduled fire time.
+        let delay = match schedule.upcoming(Utc).next() {
+            Some(next) => (next - Utc::now())
+                .to_std()
+                .unwrap_or(Duration::ZERO),
+            None => {
+                error!(
+                    "[{}] dump: cron {:?} has no future occurrences",
+                    module_name, cfg.schedule
+                );
+                return;
+            }
+        };
+        let table_names: Vec<&str> = tables.iter().map(|(t, _)| t.as_str()).collect();
+
+        debug!("[{}] dumper for {:?} sleeping {:?}", module_name, table_names, delay);
+
+        tokio::select! {
+            biased;
+            _ = &mut shutdown_signal => return,
+            _ = tokio::time::sleep(delay) => {}
+        }
+
+        info!(
+            "[{}] dump: starting scheduled dump for tables {:?}",
+            module_name, table_names
+        );
+
+        // Open a short-lived connection purely for this dump.
+        let (cache_tx, mut cache_rx) = unbounded_channel::<DbUpdate>();
+        let tables_for_connect = cfg.tables.clone();
+        let module_for_log = module_name.clone();
+
+        let built = DbConnection::builder()
+            .with_uri(&host)
+            .with_module_name(&module_name)
+            .with_token(Some(&token))
+            .with_light_mode(true)
+            .with_channel(cache_tx.clone())
+            .on_connect(move |ctx, _id, _tok| {
+                info!("[{}] dump: connected, subscribing to tables", module_for_log);
+                let queries: Vec<String> = tables_for_connect.iter().map(|t| {
+                    match &t.query {
+                        Some(q) => q.to_string(),
+                        None => format!("SELECT * FROM {};", t.name),
+                    }
+                }).collect();
+                ctx.subscription_builder().subscribe(queries);
+            })
+            .on_disconnect(|_, _| {})
+            .build();
+
+        let con = match built {
+            Ok(c) => c,
+            Err(e) => {
+                error!("[{}] dump: failed to build connection: {:?}", module_name, e);
+                continue;
+            }
+        };
+
+        // Drive the dump connection in a background task; kill it via signal.
+        let (signal_tx, signal_rx) = tokio::sync::oneshot::channel::<()>();
+        let con_task = tokio::spawn(async move {
+            let _ = con.run_until(signal_rx).await;
+        });
+
+        // Build a SupportedTable → config map for fast lookup during receive.
+        let mut pending: hashbrown::HashMap<SupportedTable, &crate::config::DumpTableConfig> =
+            tables.iter().map(|(t, cfg)| (*t, *cfg)).collect();
+        let deadline = tokio::time::sleep(DUMP_TIMEOUT);
+        tokio::pin!(deadline);
+
+        'recv: loop {
+            tokio::select! {
+                biased;
+                _ = &mut deadline => {
+                    if !pending.is_empty() {
+                        let names: Vec<&str> = pending.keys().map(|t| t.as_str()).collect();
+                        warn!(
+                            "[{}] dump: timed out waiting for tables {:?}",
+                            module_name, names
+                        );
+                    }
+                    break 'recv;
+                }
+                upd = cache_rx.recv() => {
+                    let Some(upd) = upd else { break 'recv; };
+                    let arrived: Vec<SupportedTable> = pending
+                        .keys()
+                        .copied()
+                        .filter(|t| table_extract::has_inserts(&upd, *t))
+                        .collect();
+                    for table in arrived {
+                        let table_cfg = pending.remove(&table).unwrap();
+                        let rows = table_extract::extract_rows_json(&upd, table);
+                        info!(
+                            "[{}] dump: {} rows received for table '{}'",
+                            module_name,
+                            rows.len(),
+                            table.as_str()
+                        );
+                        let msg = DumpMsg {
+                            module_name: module_name.clone(),
+                            table_name: table.as_str().to_string(),
+                            output_folder: table_cfg.output_folder.clone(),
+                            output_file: table_cfg.output_file.clone(),
+                            rows,
+                        };
+                        if let Err(e) = dump_tx.try_send(msg) {
+                            warn!("[{}] dump: channel send failed: {:?}", module_name, e);
+                        }
+                    }
+                    if pending.is_empty() {
+                        break 'recv;
+                    }
+                }
+            }
+        }
+
+        // Tear down the dump connection.
+        let _ = signal_tx.send(());
+        let _ = con_task.await;
     }
 }

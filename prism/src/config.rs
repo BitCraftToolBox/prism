@@ -12,6 +12,8 @@ pub struct Config {
     pub database: DatabaseConfig,
     #[serde(default)]
     pub pipelines: PipelinesConfig,
+    #[serde(default)]
+    pub dumper: DumperConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -22,6 +24,12 @@ pub struct UpstreamConfig {
     /// if unset, only regions with their own token will be connected to.
     #[serde(default)]
     pub default_token: Option<String>,
+    /// Default dump schedules applied to every region that does not set its
+    /// own `dumps` key.  A region with an explicit `dumps = []` (empty array)
+    /// suppresses the default and runs no dumps; a region that omits the key
+    /// entirely inherits this list.
+    #[serde(default)]
+    pub default_dump_schedule: Option<Vec<DumpScheduleConfig>>,
     pub regions: Vec<RegionConfig>,
 }
 
@@ -37,6 +45,44 @@ pub struct RegionConfig {
     /// is used.
     #[serde(default)]
     pub token: Option<String>,
+    /// Scheduled table dumps for this region.
+    ///
+    /// - **Absent** (`dumps` key omitted): inherits
+    ///   [`UpstreamConfig::default_dump_schedule`] if set.
+    /// - **Explicitly empty** (`dumps = []`): no dumps, even if a default is
+    ///   configured.
+    /// - **Non-empty**: uses these schedules exclusively.
+    pub dumps: Option<Vec<DumpScheduleConfig>>,
+}
+
+/// One scheduled dump entry: on the given cron schedule, connect to the
+/// upstream module and pull a fresh snapshot of each listed table.
+/// The schedule uses 6-field cron syntax: `sec min hour dom month dow`
+/// e.g. `"0 0 * * * *"` = every hour on the hour.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DumpScheduleConfig {
+    /// Cron expression (6-field: sec min hour dom month dow).
+    pub schedule: String,
+    /// Tables to snapshot on this schedule.
+    pub tables: Vec<DumpTableConfig>,
+}
+
+/// Per-table dump configuration within a [`DumpScheduleConfig`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct DumpTableConfig {
+    /// Table name, e.g. `"terrain_chunk_state"`.
+    pub name: String,
+    /// Optional query override instead of `SELECT * FROM name;`.
+    /// Allows custom joins, filters, etc.
+    #[serde(default)]
+    pub query: Option<String>,
+    /// Optional output subdirectory override.  When set this, folder name is
+    /// used instead of the module name, still rooted under `dumper.output_dir`.
+    #[serde(default)]
+    pub output_folder: Option<String>,
+    /// Optional output file name override, instead of table name.
+    #[serde(default)]
+    pub output_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -61,11 +107,29 @@ pub struct PipelinesConfig {
     pub players: bool,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct DumperConfig {
+    /// Directory to write snapshot files into. Defaults to `"/data"`.
+    #[serde(default = "default_dump_dir")]
+    pub output_dir: String,
+}
+
+impl Default for DumperConfig {
+    fn default() -> Self {
+        Self {
+            output_dir: default_dump_dir(),
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
 fn default_upstream_host() -> String {
     "https://bitcraft-early-access.spacetimedb.com".into()
+}
+fn default_dump_dir() -> String {
+    "/data/".into()
 }
 
 impl Config {
@@ -111,5 +175,23 @@ impl Config {
             .token
             .as_deref()
             .or(self.upstream.default_token.as_deref())
+    }
+
+    /// Dump schedules to use for a given region.
+    ///
+    /// Resolution order:
+    /// 1. Region has explicit `dumps` (even `[]`) → use it as-is.
+    /// 2. Region omits `dumps` and a `default_dump_schedule` is set → use
+    ///    the default.
+    /// 3. Otherwise → empty slice (no dumps).
+    pub fn dumps_for<'a>(&'a self, region: &'a RegionConfig) -> &'a [DumpScheduleConfig] {
+        match &region.dumps {
+            Some(v) => v.as_slice(),
+            None => self
+                .upstream
+                .default_dump_schedule
+                .as_deref()
+                .unwrap_or(&[]),
+        }
     }
 }

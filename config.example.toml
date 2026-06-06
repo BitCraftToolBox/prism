@@ -11,10 +11,34 @@ host = "https://bitcraft-early-access.spacetimedb.com"
 # own `token`.
 # default_token = "..."
 
+# Optional default dump schedules applied to every region that omits its own
+# `dumps` key. A region with `dumps = []` suppresses the default and runs no
+# dumps; a region that omits the key entirely inherits this list.
+#
+# [[upstream.default_dump_schedule]]
+# schedule = "0 0 * * * *"   # 6-field cron: sec min hour dom month dow
+# tables = [
+#   { name = "biome_desc", output_folder = "global" },
+# ]
+
 [[upstream.regions]]
 name  = "bitcraft-live-1"
 id    = 1
 # token = "..."   # optional per-region override
+
+# Optional scheduled table dumps for this region.
+# Omitting `dumps` entirely inherits `upstream.default_dump_schedule` if set.
+# Set `dumps = []` to explicitly disable dumps for this region even when a
+# default is configured. Otherwise, each entry subscribes to the listed tables
+# on the given interval, waits for the initial rows, and writes them to the
+# dumper output directory.
+# [[upstream.regions.dumps]]
+# schedule = "0 0 * * * *"   # 6-field cron: sec min hour dom month dow (every hour on the hour)
+# tables = [
+#   { name = "terrain_chunk_state", query = "SELECT * FROM terrain_chunk_state WHERE dimension = 1;" },
+#   { name = "biome_desc", output_folder = "global" },
+#   { name = "location_state", query = "SELECT loc.* FROM paved_tile_state pts JOIN location_state loc ON pts.entity_id = loc.entity_id;" },
+# ]
 
 [[upstream.regions]]
 name = "bitcraft-live-2"
@@ -33,4 +57,8 @@ url = "postgres://prism:prism@localhost:5432/prism"
 resources = true
 enemies   = true
 players   = true
+
+# Optional dumper configuration.
+# [dumper]
+# output_dir = "dumps"   # default; one sub-directory per region, one JSON file per table
 

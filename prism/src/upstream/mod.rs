@@ -15,9 +15,11 @@ pub mod subscription;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
+use tokio::sync::mpsc::Sender;
 use upstream_bindings::region::DbUpdate;
 
 use crate::config::Config;
+use crate::dumper::DumpMsg;
 use crate::shutdown::SharedShutdown;
 
 /// A region update destined for the processor. Carries the originating region
@@ -70,6 +72,7 @@ pub fn load_phase(p: &SharedPhase) -> Phase {
 pub async fn run_all(
     config: Arc<Config>,
     tx: tokio::sync::mpsc::UnboundedSender<RegionUpdate>,
+    dump_tx: Sender<DumpMsg>,
     shutdown: SharedShutdown,
 ) -> anyhow::Result<()> {
     let mut handles = Vec::new();
@@ -77,9 +80,10 @@ pub async fn run_all(
         let region = region.clone();
         let config = config.clone();
         let tx = tx.clone();
+        let dump_tx = dump_tx.clone();
         let shutdown = shutdown.clone();
         handles.push(tokio::spawn(async move {
-            connection::run_region(config, region, tx, shutdown).await
+            connection::run_region(config, region, tx, dump_tx, shutdown).await
         }));
     }
     // Wait for all region tasks; first hard error propagates after the rest finish.

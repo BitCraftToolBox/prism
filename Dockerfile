@@ -15,8 +15,6 @@ RUN apk add --no-cache \
     linux-headers \
     git
 
-# Cache workspace deps by building with dummy source first.
-# Copy only manifests and lock file.
 COPY Cargo.toml Cargo.lock ./
 COPY relay-bindings/Cargo.toml relay-bindings/Cargo.toml
 COPY prism/Cargo.toml prism/Cargo.toml

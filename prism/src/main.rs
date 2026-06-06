@@ -1,6 +1,7 @@
 //! Prism — BitCraft multi-region relay & historical pipeline.
 
 mod config;
+mod dumper;
 mod history;
 mod processor;
 mod relay;
@@ -12,7 +13,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use log::{error, info};
+use mimalloc::MiMalloc;
 use tokio::sync::mpsc::unbounded_channel;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -34,13 +39,15 @@ async fn main() -> Result<()> {
     let (upstream_tx, upstream_rx) = unbounded_channel();
     // Processor → sink channels (bounded).
     let (proc_handle, sinks) = processor::channels(&config);
+    // upstream → dumper channel (bounded).
+    let (dump_tx, dump_rx) = tokio::sync::mpsc::channel(dumper::dumper_capacity(&config));
 
-    // Spawn upstream, processor, relay, history concurrently. Each gets a
-    // clone of the shared shutdown coordinator; first hard error triggers
-    // shutdown for everyone.
+    // Spawn upstream, processor, relay, history, dumper concurrently. Each
+    // gets a clone of the shared shutdown coordinator; first hard error
+    // triggers shutdown for everyone.
     let up = tokio::spawn(spawn_subsystem(
         "upstream",
-        upstream::run_all(config.clone(), upstream_tx, shutdown.clone()),
+        upstream::run_all(config.clone(), upstream_tx, dump_tx, shutdown.clone()),
         shutdown.clone(),
     ));
     let proc = tokio::spawn(spawn_subsystem(
@@ -58,8 +65,13 @@ async fn main() -> Result<()> {
         history::run(config.clone(), sinks.history_rx, shutdown.clone()),
         shutdown.clone(),
     ));
+    let dump = tokio::spawn(spawn_subsystem(
+        "dumper",
+        dumper::run(config.clone(), dump_rx, shutdown.clone()),
+        shutdown.clone(),
+    ));
 
-    let _ = tokio::join!(up, proc, relay, history);
+    let _ = tokio::join!(up, proc, relay, history, dump);
     info!("all subsystems exited; bye");
     Ok(())
 }

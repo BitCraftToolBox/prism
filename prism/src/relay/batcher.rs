@@ -278,7 +278,6 @@ pub async fn run(
     flush_player_state_batch(&conn, &mut batches);
     info!("relay batcher: disconnecting...");
     conn.disconnect();
-    info!("relay batcher: exited");
     Ok(())
 }
 

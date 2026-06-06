@@ -114,7 +114,6 @@ pub async fn run(
     if !buffer.is_empty() {
         flush(&pool, &mut buffer).await;
     }
-    info!("history: exited");
     Ok(())
 }
 
