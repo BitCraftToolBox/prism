@@ -32,6 +32,14 @@ pub enum SupportedTable {
     PavedTileState,
     LocationState,
     WorldRegionState,
+    ClaimState,
+    ClaimLocalState,
+    ClaimTechState,
+    WaystoneState,
+    BankState,
+    MarketplaceState,
+    WorldRegionNameState,
+    GrowthState,
 }
 
 impl SupportedTable {
@@ -44,6 +52,14 @@ impl SupportedTable {
             SupportedTable::PavedTileState => "paved_tile_state",
             SupportedTable::LocationState => "location_state",
             SupportedTable::WorldRegionState => "world_region_state",
+            SupportedTable::ClaimState => "claim_state",
+            SupportedTable::ClaimLocalState => "claim_local_state",
+            SupportedTable::ClaimTechState => "claim_tech_state",
+            SupportedTable::WaystoneState => "waystone_state",
+            SupportedTable::BankState => "bank_state",
+            SupportedTable::MarketplaceState => "marketplace_state",
+            SupportedTable::WorldRegionNameState => "world_region_name_state",
+            SupportedTable::GrowthState => "growth_state",
         }
     }
 
@@ -55,6 +71,14 @@ impl SupportedTable {
         SupportedTable::PavedTileState,
         SupportedTable::LocationState,
         SupportedTable::WorldRegionState,
+        SupportedTable::ClaimState,
+        SupportedTable::ClaimLocalState,
+        SupportedTable::ClaimTechState,
+        SupportedTable::WaystoneState,
+        SupportedTable::BankState,
+        SupportedTable::MarketplaceState,
+        SupportedTable::WorldRegionNameState,
+        SupportedTable::GrowthState,
     ];
 
     /// Parse a table name string into a [`SupportedTable`], returning `None`
@@ -76,6 +100,14 @@ pub fn has_inserts(update: &DbUpdate, table: SupportedTable) -> bool {
         SupportedTable::PavedTileState => !update.paved_tile_state.inserts.is_empty(),
         SupportedTable::LocationState => !update.location_state.inserts.is_empty(),
         SupportedTable::WorldRegionState => !update.world_region_state.inserts.is_empty(),
+        SupportedTable::ClaimState => !update.claim_state.inserts.is_empty(),
+        SupportedTable::ClaimLocalState => !update.claim_local_state.inserts.is_empty(),
+        SupportedTable::ClaimTechState => !update.claim_tech_state.inserts.is_empty(),
+        SupportedTable::WaystoneState => !update.waystone_state.inserts.is_empty(),
+        SupportedTable::BankState => !update.bank_state.inserts.is_empty(),
+        SupportedTable::MarketplaceState => !update.marketplace_state.inserts.is_empty(),
+        SupportedTable::WorldRegionNameState => !update.world_region_name_state.inserts.is_empty(),
+        SupportedTable::GrowthState => !update.growth_state.inserts.is_empty(),
     }
 }
 
@@ -89,6 +121,14 @@ pub fn extract_rows_json(update: &DbUpdate, table: SupportedTable) -> Vec<Value>
         SupportedTable::PavedTileState => serialize(&update.paved_tile_state),
         SupportedTable::LocationState => serialize(&update.location_state),
         SupportedTable::WorldRegionState => serialize(&update.world_region_state),
+        SupportedTable::ClaimState => serialize(&update.claim_state),
+        SupportedTable::ClaimLocalState => serialize(&update.claim_local_state),
+        SupportedTable::ClaimTechState => serialize(&update.claim_tech_state),
+        SupportedTable::WaystoneState => serialize(&update.waystone_state),
+        SupportedTable::BankState => serialize(&update.bank_state),
+        SupportedTable::MarketplaceState => serialize(&update.marketplace_state),
+        SupportedTable::WorldRegionNameState => serialize(&update.world_region_name_state),
+        SupportedTable::GrowthState => serialize(&update.growth_state),
     }
 }
 

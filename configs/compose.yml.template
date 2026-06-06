@@ -12,4 +12,5 @@ services:$SERVICE$
     container_name: $NAME$
     volumes:
       - ./config/prism/prism-$GROUP$.toml:/etc/prism/config.toml:ro
+      - ./data/prism:/data/prism
     <<: *common
