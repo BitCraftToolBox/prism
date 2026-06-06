@@ -1,5 +1,5 @@
 x-common: &common
-  image: prism
+  image: ghcr.io/bitcrafttoolbox/prism:latest
   depends_on:
     timescaledb:
       condition: service_healthy
