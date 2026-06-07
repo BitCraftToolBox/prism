@@ -176,10 +176,9 @@ impl Config {
             }
         }
         if self.relay.token.is_none() {
-            return Err(anyhow!("relay has no token; use config.toml or PRISM_RELAY_TOKEN env var"));
-        }
-        if self.database.url.is_none() {
-            return Err(anyhow!("database URL is not set; use config.toml or DATABASE_URL env var"));
+            return Err(anyhow!(
+                "relay has no token; use config.toml or PRISM_RELAY_TOKEN env var"
+            ));
         }
         Ok(())
     }

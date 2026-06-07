@@ -33,6 +33,10 @@ pub struct RelayConnection {
     pump: std::thread::JoinHandle<()>,
 }
 
+fn error_is_normal_disconnect(e: &relay_sdk::Error) -> bool {
+    matches!(e, relay_sdk::Error::Disconnected)
+}
+
 impl RelayConnection {
     /// Build and connect, call init_relay, start the message pump thread.
     /// Returns once the connection object is ready (the WebSocket handshake
@@ -42,7 +46,10 @@ impl RelayConnection {
 
         let uri = cfg.uri.clone();
         let module = cfg.module.clone();
-        let token = cfg.token.clone().expect("Relay token missing, should have been validated in config.");
+        let token = cfg
+            .token
+            .clone()
+            .expect("Relay token missing, should have been validated in config.");
 
         // build() establishes the WebSocket synchronously; run in a blocking
         // thread so we don't stall the tokio executor.
@@ -55,6 +62,7 @@ impl RelayConnection {
                     info!("relay: connected to downstream module");
                 })
                 .on_disconnect(|_ctx, err| match err {
+                    Some(e) if error_is_normal_disconnect(&e) => info!("relay: disconnected"),
                     Some(e) => warn!("relay: disconnected: {:?}", e),
                     None => info!("relay: disconnected"),
                 })

@@ -18,14 +18,18 @@ use upstream_bindings::sdk::DbContext;
 use super::subscription::{enabled_pipelines, queue_subscribe};
 use super::{Phase, RegionUpdate, SharedPhase, load_phase, store_phase};
 use crate::config::{Config, DumpScheduleConfig, RegionConfig};
-use crate::dumper::{DumpMsg, table_extract};
 use crate::dumper::table_extract::SupportedTable;
+use crate::dumper::{DumpMsg, table_extract};
 use crate::shutdown::SharedShutdown;
 
 const UPSTREAM_URI: &str = "https://bitcraft-early-access.spacetimedb.com";
 const RECONNECT_BACKOFF: Duration = Duration::from_secs(5);
 /// Maximum time to wait for a dump subscription to deliver rows.
 const DUMP_TIMEOUT: Duration = Duration::from_secs(60);
+
+fn error_is_normal_disconnect(e: &upstream_bindings::sdk::Error) -> bool {
+    matches!(e, upstream_bindings::sdk::Error::Disconnected)
+}
 
 pub async fn run_region(
     config: Arc<Config>,
@@ -117,6 +121,9 @@ pub async fn run_region(
                 );
             })
             .on_disconnect(move |_ectx, err| match err {
+                Some(e) if error_is_normal_disconnect(&e) => {
+                    info!("[{}] disconnected", region_name_for_disconnect)
+                }
                 Some(e) => warn!("[{}] disconnected: {:?}", region_name_for_disconnect, e),
                 None => info!("[{}] disconnected", region_name_for_disconnect),
             })
@@ -226,9 +233,7 @@ async fn run_dump_schedule(
     loop {
         // Compute sleep duration until the next scheduled fire time.
         let delay = match schedule.upcoming(Utc).next() {
-            Some(next) => (next - Utc::now())
-                .to_std()
-                .unwrap_or(Duration::ZERO),
+            Some(next) => (next - Utc::now()).to_std().unwrap_or(Duration::ZERO),
             None => {
                 error!(
                     "[{}] dump: cron {:?} has no future occurrences",
@@ -239,7 +244,10 @@ async fn run_dump_schedule(
         };
         let table_names: Vec<&str> = tables.iter().map(|(t, _)| t.as_str()).collect();
 
-        debug!("[{}] dumper for {:?} sleeping {:?}", module_name, table_names, delay);
+        debug!(
+            "[{}] dumper for {:?} sleeping {:?}",
+            module_name, table_names, delay
+        );
 
         tokio::select! {
             biased;
@@ -264,13 +272,17 @@ async fn run_dump_schedule(
             .with_light_mode(true)
             .with_channel(cache_tx.clone())
             .on_connect(move |ctx, _id, _tok| {
-                info!("[{}] dump: connected, subscribing to tables", module_for_log);
-                let queries: Vec<String> = tables_for_connect.iter().map(|t| {
-                    match &t.query {
+                info!(
+                    "[{}] dump: connected, subscribing to tables",
+                    module_for_log
+                );
+                let queries: Vec<String> = tables_for_connect
+                    .iter()
+                    .map(|t| match &t.query {
                         Some(q) => q.to_string(),
                         None => format!("SELECT * FROM {};", t.name),
-                    }
-                }).collect();
+                    })
+                    .collect();
                 ctx.subscription_builder().subscribe(queries);
             })
             .on_disconnect(|_, _| {})
@@ -279,7 +291,10 @@ async fn run_dump_schedule(
         let con = match built {
             Ok(c) => c,
             Err(e) => {
-                error!("[{}] dump: failed to build connection: {:?}", module_name, e);
+                error!(
+                    "[{}] dump: failed to build connection: {:?}",
+                    module_name, e
+                );
                 continue;
             }
         };
@@ -299,11 +314,15 @@ async fn run_dump_schedule(
         'recv: loop {
             tokio::select! {
                 biased;
+                _ = &mut shutdown_signal => {
+                    info!("[{}] dump: shutdown signal received, terminating dump", module_name);
+                    break 'recv;
+                }
                 _ = &mut deadline => {
                     if !pending.is_empty() {
                         let names: Vec<&str> = pending.keys().map(|t| t.as_str()).collect();
                         warn!(
-                            "[{}] dump: timed out waiting for tables {:?}",
+                            "[{}] dump: timed out waiting for tables {:?} (no rows?)",
                             module_name, names
                         );
                     }
@@ -336,9 +355,14 @@ async fn run_dump_schedule(
                             warn!("[{}] dump: channel send failed: {:?}", module_name, e);
                         }
                     }
-                    if pending.is_empty() {
-                        break 'recv;
+                    if !pending.is_empty() {
+                        let names: Vec<&str> = pending.keys().map(|t| t.as_str()).collect();
+                        info!("[{}] dump: subscription received with no rows for tables: {:?}", module_name, names);
                     }
+                    // we only expect a single message since we only sent one subscription (with multiple queries)
+                    // if we got an InitialSubscription update at all, it contains all rows for all queries
+                    // any tables without rows in this initial message did not have matching rows at all
+                    break 'recv;
                 }
             }
         }
@@ -346,5 +370,10 @@ async fn run_dump_schedule(
         // Tear down the dump connection.
         let _ = signal_tx.send(());
         let _ = con_task.await;
+
+        // Exit early if shutdown was triggered.
+        if shutdown.lock().await.register().is_none() {
+            return;
+        }
     }
 }

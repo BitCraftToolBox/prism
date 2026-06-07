@@ -332,11 +332,15 @@ fn emit_deltas(
     );
     send_relay(
         &sinks.relay_tx,
-        player_state_deletes.into_iter().map(RelayMsg::DeletePlayerState),
+        player_state_deletes
+            .into_iter()
+            .map(RelayMsg::DeletePlayerState),
     );
     send_relay(
         &sinks.relay_tx,
-        player_state_upserts.into_iter().map(RelayMsg::UpsertPlayerState),
+        player_state_upserts
+            .into_iter()
+            .map(RelayMsg::UpsertPlayerState),
     );
     for msg in history_msgs {
         if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = sinks.history_tx.try_send(msg)
