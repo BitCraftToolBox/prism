@@ -21,6 +21,14 @@ pub fn history_capacity(_config: &Config) -> usize {
     16384
 }
 
+pub fn history_enabled(config: &Config) -> bool {
+    config
+        .database
+        .url
+        .as_ref()
+        .map_or(false, |url| !url.is_empty())
+}
+
 const FLUSH_INTERVAL_MS: u64 = 5000;
 const MAX_BATCH: usize = 500;
 
@@ -36,19 +44,15 @@ pub enum HistoryMsg {
 
 pub async fn run(
     config: Arc<Config>,
-    mut rx: Receiver<HistoryMsg>,
+    rx: Option<Receiver<HistoryMsg>>,
     shutdown: SharedShutdown,
 ) -> Result<()> {
-    if config
-        .database
-        .url
-        .as_ref()
-        .map_or(true, |url| url.is_empty())
-    {
+    let Some(mut rx) = rx else {
         info!("Database not configured, history will not be stored.");
         return Ok(());
     };
-    let url = config.database.url.as_ref().unwrap();
+    // history_enabled was checked in channels(); url is guaranteed non-empty here.
+    let url = config.database.url.as_ref().expect("history enabled but no database url");
     info!("history: connecting to database...");
     let pool = PgPoolOptions::new()
         .max_connections(4)

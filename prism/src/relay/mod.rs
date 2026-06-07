@@ -46,8 +46,30 @@ pub enum RelayMsg {
 
     DeleteResource(u64),
     DeleteEnemy(u64),
-    DeletePlayer(u64),
-    DeletePlayerState(u64),
+
+    /// Live-phase delta: update location of an existing player or enemy.
+    /// The relay module resolves which table to update.
+    MoveMobileEntities(Vec<MobileMoveRow>),
+    /// Live-phase delta: mark players as online (signed_in_player_state insert).
+    SetPlayersOnline(Vec<u64>),
+    /// Live-phase delta: mark players as offline (signed_in_player_state delete).
+    SetPlayersOffline(Vec<u64>),
+    /// Live-phase delta: rename players (player_username_state update for known entity).
+    RenamePlayers(Vec<PlayerRenameRow>),
+}
+
+#[derive(Debug, Clone)]
+pub struct MobileMoveRow {
+    pub entity_id: u64,
+    pub region_id: u8,
+    pub x: i32,
+    pub z: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlayerRenameRow {
+    pub entity_id: u64,
+    pub name: String,
 }
 
 #[derive(Debug, Clone)]

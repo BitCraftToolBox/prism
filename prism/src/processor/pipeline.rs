@@ -87,9 +87,9 @@ pub async fn handle(
         // (e.g. offline player locations), which we don't want to record.
         // Instead, we'll only record the first movement we get after the live phase.
 
-        // The snapshot is done; the last_location cache is no longer needed.
-        // Drop it now so delta mode doesn't maintain stale per-entity history.
-        region.clear_last_location();
+        // The snapshot is done; all sync-phase caches are no longer needed.
+        // clear_live_caches seeds player_entity_ids and drops the rest.
+        region.clear_live_caches();
 
         // The snapshot already covered this batch's state; nothing more to emit.
         return Ok(());
@@ -110,11 +110,11 @@ fn update_join_maps(
 ) {
     let live = region.is_live;
 
-    // Resources: location_state for coordinates, resource_state for kind.
-    for e in &update.resource_state.deletes {
-        region.resource_kind.remove(&e.row.entity_id);
-    }
     if !live {
+        // Resources: location_state for coordinates, resource_state for kind.
+        for e in &update.resource_state.deletes {
+            region.resource_kind.remove(&e.row.entity_id);
+        }
         for e in &update.location_state.inserts {
             region.last_location.insert(
                 e.row.entity_id,
@@ -128,47 +128,42 @@ fn update_join_maps(
         for e in &update.location_state.deletes {
             region.last_location.remove(&e.row.entity_id);
         }
-    }
-    for e in &update.resource_state.inserts {
-        region
-            .resource_kind
-            .insert(e.row.entity_id, e.row.resource_id);
-    }
+        for e in &update.resource_state.inserts {
+            region
+                .resource_kind
+                .insert(e.row.entity_id, e.row.resource_id);
+        }
 
-    // Enemies: enemy_state for kind, mobile_entity_state for location.
-    for e in &update.enemy_state.deletes {
-        region.enemy_kind.remove(&e.row.entity_id);
-    }
-    for e in &update.enemy_state.inserts {
-        region
-            .enemy_kind
-            .insert(e.row.entity_id, e.row.enemy_type as i32);
-    }
+        // Enemies: enemy_state for kind, mobile_entity_state for location.
+        for e in &update.enemy_state.deletes {
+            region.enemy_kind.remove(&e.row.entity_id);
+        }
+        for e in &update.enemy_state.inserts {
+            region
+                .enemy_kind
+                .insert(e.row.entity_id, e.row.enemy_type as i32);
+        }
 
-    // Players: player_username_state for membership/username,
-    //          signed_in_player_state for online status.
-    for e in &update.player_username_state.deletes {
-        region.player_username.remove(&e.row.entity_id);
-        region.player_signed_in.remove(&e.row.entity_id);
-        if !live {
+        // Players: player_username_state for membership/username,
+        //          signed_in_player_state for online status.
+        for e in &update.player_username_state.deletes {
+            region.player_username.remove(&e.row.entity_id);
+            region.player_signed_in.remove(&e.row.entity_id);
             region.last_location.remove(&e.row.entity_id);
         }
-    }
-    for e in &update.player_username_state.inserts {
-        region
-            .player_username
-            .insert(e.row.entity_id, e.row.username.clone());
-    }
-    for e in &update.signed_in_player_state.deletes {
-        region.player_signed_in.remove(&e.row.entity_id);
-    }
-    for e in &update.signed_in_player_state.inserts {
-        region.player_signed_in.insert(e.row.entity_id);
-    }
+        for e in &update.player_username_state.inserts {
+            region
+                .player_username
+                .insert(e.row.entity_id, e.row.username.clone());
+        }
+        for e in &update.signed_in_player_state.deletes {
+            region.player_signed_in.remove(&e.row.entity_id);
+        }
+        for e in &update.signed_in_player_state.inserts {
+            region.player_signed_in.insert(e.row.entity_id);
+        }
 
-    // Mobile entity state provides locations for both enemies and players.
-    // Only needed during the Syncing phase for snapshot building.
-    if !live {
+        // Mobile entity state provides locations for both enemies and players.
         for e in &update.mobile_entity_state.inserts {
             region.last_location.insert(
                 e.row.entity_id,
@@ -178,6 +173,14 @@ fn update_join_maps(
                     dimension: e.row.dimension,
                 },
             );
+        }
+    } else {
+        // Live phase: only maintain player_entity_ids for history routing.
+        for e in &update.player_username_state.inserts {
+            region.player_entity_ids.insert(e.row.entity_id);
+        }
+        for e in &update.player_username_state.deletes {
+            region.player_entity_ids.remove(&e.row.entity_id);
         }
     }
 }
@@ -197,9 +200,11 @@ fn emit_deltas(
     let mut enemy_upserts: Vec<EnemyRow> = Vec::new();
     let mut enemy_deletes: Vec<u64> = Vec::new();
     let mut player_upserts: Vec<PlayerRow> = Vec::new();
-    let mut player_deletes: Vec<u64> = Vec::new();
     let mut player_state_upserts: Vec<PlayerStateRow> = Vec::new();
-    let mut player_state_deletes: Vec<u64> = Vec::new();
+    let mut mobile_moves: Vec<crate::relay::MobileMoveRow> = Vec::new();
+    let mut player_online_ids: Vec<u64> = Vec::new();
+    let mut player_offline_ids: Vec<u64> = Vec::new();
+    let mut player_renames: Vec<crate::relay::PlayerRenameRow> = Vec::new();
     let mut history_msgs: Vec<HistoryMsg> = Vec::new();
 
     // Resource deletes.
@@ -227,34 +232,69 @@ fn emit_deltas(
         }
     }
 
-    // Mobile entity updates: resolve to enemy or player.
+    // Mobile entity updates.
+    // SpacetimeDB transactional guarantees:
+    //   - New enemy spawn: enemy_state.inserts + mobile_entity_state.inserts in same tx
+    //   - New player arrival: player_username_state.inserts + signed_in_player_state.inserts
+    //     + mobile_entity_state.inserts in same tx
+    //   - Existing entity movement: only mobile_entity_state.inserts (no accompanying kind event)
     for e in &update.mobile_entity_state.inserts {
-        let dim = e.row.dimension;
-        if dim != OVERWORLD_DIM {
+        if e.row.dimension != OVERWORLD_DIM {
             continue;
         }
         let eid = e.row.entity_id;
-        if let Some(&etype) = region.enemy_kind.get(&eid) {
+        let x = e.row.location_x;
+        let z = e.row.location_z;
+
+        if let Some(enemy_ins) = update
+            .enemy_state
+            .inserts
+            .iter()
+            .find(|ei| ei.row.entity_id == eid)
+        {
+            // New enemy spawn: we have the type from the same-batch enemy_state insert.
             enemy_upserts.push(EnemyRow {
                 entity_id: eid,
-                enemy_type: etype,
+                enemy_type: enemy_ins.row.enemy_type as i32,
                 region_id,
-                x: e.row.location_x,
-                z: e.row.location_z,
+                x,
+                z,
             });
-        } else if region.player_username.contains_key(&eid) {
+        } else if update
+            .player_username_state
+            .inserts
+            .iter()
+            .any(|pi| pi.row.entity_id == eid)
+        {
+            // New player arrival: location row only (state row is emitted below).
             player_upserts.push(PlayerRow {
                 entity_id: eid,
                 region_id,
-                x: e.row.location_x,
-                z: e.row.location_z,
+                x,
+                z,
             });
             history_msgs.push(HistoryMsg::PlayerLocation {
                 entity_id: eid,
                 timestamp: e.row.timestamp,
-                x: e.row.location_x,
-                z: e.row.location_z,
+                x,
+                z,
             });
+        } else {
+            // Existing entity movement — relay module resolves player vs enemy.
+            mobile_moves.push(crate::relay::MobileMoveRow {
+                entity_id: eid,
+                region_id,
+                x,
+                z,
+            });
+            if region.player_entity_ids.contains(&eid) {
+                history_msgs.push(HistoryMsg::PlayerLocation {
+                    entity_id: eid,
+                    timestamp: e.row.timestamp,
+                    x,
+                    z,
+                });
+            }
         }
     }
 
@@ -263,47 +303,58 @@ fn emit_deltas(
         enemy_deletes.push(e.row.entity_id);
     }
 
-    // Player location + state deletes: player_username_state deletion means the
-    // player left (or transferred to another region); remove both location and state.
-    for e in &update.player_username_state.deletes {
-        player_deletes.push(e.row.entity_id);
-        player_state_deletes.push(e.row.entity_id);
-    }
-
-    // Player state upserts on username arrival (new player in region).
-    // Online status is read from the already-updated signed_in map.
+    // Player username events.
+    //
+    // Arrivals (entity not yet in player_entity_ids — update_join_maps already
+    // inserted it so we re-check via the update batch rather than the set):
+    //   emit UpsertPlayerState; online derived from same-batch signed_in inserts
+    //   (guaranteed present if the player is currently online by game invariants).
+    //
+    // Renames (entity already known — update_join_maps inserted the new name
+    //   before clear_live_caches ran so player_entity_ids was seeded with this id):
+    //   emit RenamePlayers; no online-state change.
+    //
+    // Deletes → NO-OP: we don't emit DeletePlayer/DeletePlayerState in live mode
+    //   to avoid racing with the receiving region on a transfer.  Stale data at
+    //   last-known location/state is acceptable until the next bulk replace.
     for e in &update.player_username_state.inserts {
         let eid = e.row.entity_id;
-        player_state_upserts.push(PlayerStateRow {
-            entity_id: eid,
-            region_id,
-            online: region.player_signed_in.contains(&eid),
-            name: e.row.username.clone(),
-        });
+        // Was this entity already in our set before this batch?
+        // update_join_maps added it just now, so check if the pre-batch set
+        // contained it by seeing if there's also a delete in this same batch
+        // for the same entity_id (delete+insert == rename; insert-only == arrival).
+        let is_rename = update
+            .player_username_state
+            .deletes
+            .iter()
+            .any(|d| d.row.entity_id == eid);
+        if is_rename {
+            player_renames.push(crate::relay::PlayerRenameRow {
+                entity_id: eid,
+                name: e.row.username.clone(),
+            });
+        } else {
+            // New arrival: online iff signed_in_player_state.inserts contains this entity.
+            let online = update
+                .signed_in_player_state
+                .inserts
+                .iter()
+                .any(|si| si.row.entity_id == eid);
+            player_state_upserts.push(PlayerStateRow {
+                entity_id: eid,
+                region_id,
+                online,
+                name: e.row.username.clone(),
+            });
+        }
     }
 
-    // Player state upserts on sign-in / sign-out (online flag changes).
+    // Sign-in / sign-out: targeted online-field updates; no username lookup needed.
     for e in &update.signed_in_player_state.inserts {
-        let eid = e.row.entity_id;
-        if let Some(name) = region.player_username.get(&eid) {
-            player_state_upserts.push(PlayerStateRow {
-                entity_id: eid,
-                region_id,
-                online: true,
-                name: name.clone(),
-            });
-        }
+        player_online_ids.push(e.row.entity_id);
     }
     for e in &update.signed_in_player_state.deletes {
-        let eid = e.row.entity_id;
-        if let Some(name) = region.player_username.get(&eid) {
-            player_state_upserts.push(PlayerStateRow {
-                entity_id: eid,
-                region_id,
-                online: false,
-                name: name.clone(),
-            });
-        }
+        player_offline_ids.push(e.row.entity_id);
     }
 
     send_relay(
@@ -324,17 +375,7 @@ fn emit_deltas(
     );
     send_relay(
         &sinks.relay_tx,
-        player_deletes.into_iter().map(RelayMsg::DeletePlayer),
-    );
-    send_relay(
-        &sinks.relay_tx,
         player_upserts.into_iter().map(RelayMsg::UpsertPlayer),
-    );
-    send_relay(
-        &sinks.relay_tx,
-        player_state_deletes
-            .into_iter()
-            .map(RelayMsg::DeletePlayerState),
     );
     send_relay(
         &sinks.relay_tx,
@@ -342,10 +383,35 @@ fn emit_deltas(
             .into_iter()
             .map(RelayMsg::UpsertPlayerState),
     );
+    if !mobile_moves.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::MoveMobileEntities(mobile_moves)),
+        );
+    }
+    if !player_online_ids.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::SetPlayersOnline(player_online_ids)),
+        );
+    }
+    if !player_offline_ids.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::SetPlayersOffline(player_offline_ids)),
+        );
+    }
+    if !player_renames.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::RenamePlayers(player_renames)),
+        );
+    }
     for msg in history_msgs {
-        if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = sinks.history_tx.try_send(msg)
-        {
-            warn!("history channel full — dropping player location sample");
+        if let Some(tx) = &sinks.history_tx {
+            if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = tx.try_send(msg) {
+                warn!("history channel full — dropping player location sample");
+            }
         }
     }
 }

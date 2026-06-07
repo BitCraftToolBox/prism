@@ -17,13 +17,19 @@ pub mod delete_resources_reducer;
 pub mod enemy_location_table;
 pub mod enemy_location_type;
 pub mod init_relay_reducer;
+pub mod mobile_move_update_type;
+pub mod move_mobile_entities_reducer;
 pub mod player_location_table;
 pub mod player_location_type;
+pub mod player_rename_update_type;
 pub mod player_state_table;
 pub mod player_state_type;
 pub mod relay_config_type;
+pub mod rename_players_reducer;
 pub mod resource_location_table;
 pub mod resource_location_type;
+pub mod set_players_offline_reducer;
+pub mod set_players_online_reducer;
 pub mod upsert_enemies_reducer;
 pub mod upsert_player_states_reducer;
 pub mod upsert_players_reducer;
@@ -40,13 +46,19 @@ pub use delete_resources_reducer::delete_resources;
 pub use enemy_location_table::*;
 pub use enemy_location_type::EnemyLocation;
 pub use init_relay_reducer::init_relay;
+pub use mobile_move_update_type::MobileMoveUpdate;
+pub use move_mobile_entities_reducer::move_mobile_entities;
 pub use player_location_table::*;
 pub use player_location_type::PlayerLocation;
+pub use player_rename_update_type::PlayerRenameUpdate;
 pub use player_state_table::*;
 pub use player_state_type::PlayerState;
 pub use relay_config_type::RelayConfig;
+pub use rename_players_reducer::rename_players;
 pub use resource_location_table::*;
 pub use resource_location_type::ResourceLocation;
+pub use set_players_offline_reducer::set_players_offline;
+pub use set_players_online_reducer::set_players_online;
 pub use upsert_enemies_reducer::upsert_enemies;
 pub use upsert_player_states_reducer::upsert_player_states;
 pub use upsert_players_reducer::upsert_players;
@@ -93,6 +105,18 @@ pub enum Reducer {
         entity_ids: Vec<u64>,
     },
     InitRelay,
+    MoveMobileEntities {
+        moves: Vec<MobileMoveUpdate>,
+    },
+    RenamePlayers {
+        renames: Vec<PlayerRenameUpdate>,
+    },
+    SetPlayersOffline {
+        entity_ids: Vec<u64>,
+    },
+    SetPlayersOnline {
+        entity_ids: Vec<u64>,
+    },
     UpsertEnemies {
         rows: Vec<EnemyLocation>,
     },
@@ -123,6 +147,10 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeletePlayers { .. } => "delete_players",
             Reducer::DeleteResources { .. } => "delete_resources",
             Reducer::InitRelay => "init_relay",
+            Reducer::MoveMobileEntities { .. } => "move_mobile_entities",
+            Reducer::RenamePlayers { .. } => "rename_players",
+            Reducer::SetPlayersOffline { .. } => "set_players_offline",
+            Reducer::SetPlayersOnline { .. } => "set_players_online",
             Reducer::UpsertEnemies { .. } => "upsert_enemies",
             Reducer::UpsertPlayerStates { .. } => "upsert_player_states",
             Reducer::UpsertPlayers { .. } => "upsert_players",
@@ -192,6 +220,26 @@ impl __sdk::Reducer for Reducer {
                 })
             }
             Reducer::InitRelay => __sats::bsatn::to_vec(&init_relay_reducer::InitRelayArgs {}),
+            Reducer::MoveMobileEntities { moves } => {
+                __sats::bsatn::to_vec(&move_mobile_entities_reducer::MoveMobileEntitiesArgs {
+                    moves: moves.clone(),
+                })
+            }
+            Reducer::RenamePlayers { renames } => {
+                __sats::bsatn::to_vec(&rename_players_reducer::RenamePlayersArgs {
+                    renames: renames.clone(),
+                })
+            }
+            Reducer::SetPlayersOffline { entity_ids } => {
+                __sats::bsatn::to_vec(&set_players_offline_reducer::SetPlayersOfflineArgs {
+                    entity_ids: entity_ids.clone(),
+                })
+            }
+            Reducer::SetPlayersOnline { entity_ids } => {
+                __sats::bsatn::to_vec(&set_players_online_reducer::SetPlayersOnlineArgs {
+                    entity_ids: entity_ids.clone(),
+                })
+            }
             Reducer::UpsertEnemies { rows } => {
                 __sats::bsatn::to_vec(&upsert_enemies_reducer::UpsertEnemiesArgs {
                     rows: rows.clone(),

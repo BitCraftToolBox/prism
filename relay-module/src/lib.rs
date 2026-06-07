@@ -6,7 +6,7 @@
 //! relay identity (set once via [`init_relay`]) may write.
 
 use spacetimedb::http::{Body, HandlerContext, Request, Response, Router};
-use spacetimedb::{Identity, ReducerContext, Table, reducer, table};
+use spacetimedb::{Identity, ReducerContext, SpacetimeType, Table, reducer, table};
 // ---------- tables ----------
 
 #[table(accessor = resource_location, public,
@@ -257,7 +257,96 @@ pub fn delete_player_states(ctx: &ReducerContext, entity_ids: Vec<u64>) -> Resul
     Ok(())
 }
 
-// --- http ---
+// --- mobile entity movement (live-phase delta; no entity-kind lookup in prism) ---
+
+/// A single mobile-entity location update.  The relay module resolves whether
+/// the entity is a player or an enemy by checking both tables.
+#[derive(SpacetimeType)]
+pub struct MobileMoveUpdate {
+    pub entity_id: u64,
+    pub region_id: u8,
+    pub x: i32,
+    pub z: i32,
+}
+
+/// Update the location of existing mobile entities.
+/// Checks `player_location` first, then `enemy_location`.  No-ops silently if
+/// the entity is not found in either table (e.g. transferred out already).
+#[reducer]
+pub fn move_mobile_entities(
+    ctx: &ReducerContext,
+    moves: Vec<MobileMoveUpdate>,
+) -> Result<(), String> {
+    ensure_relay(ctx)?;
+    for m in moves {
+        if let Some(mut row) = ctx.db.player_location().entity_id().find(m.entity_id) {
+            row.x = m.x;
+            row.z = m.z;
+            row.region_id = m.region_id;
+            ctx.db.player_location().entity_id().update(row);
+        } else if let Some(mut row) = ctx.db.enemy_location().entity_id().find(m.entity_id) {
+            row.x = m.x;
+            row.z = m.z;
+            row.region_id = m.region_id;
+            ctx.db.enemy_location().entity_id().update(row);
+        }
+    }
+    Ok(())
+}
+
+// --- player online state (live-phase delta; no username lookup in prism) ---
+
+/// Mark a set of players as online.  No-ops for entity_ids not in `player_state`.
+#[reducer]
+pub fn set_players_online(ctx: &ReducerContext, entity_ids: Vec<u64>) -> Result<(), String> {
+    ensure_relay(ctx)?;
+    for id in entity_ids {
+        if let Some(mut row) = ctx.db.player_state().entity_id().find(id) {
+            row.online = true;
+            ctx.db.player_state().entity_id().update(row);
+        }
+    }
+    Ok(())
+}
+
+/// Mark a set of players as offline.  No-ops for entity_ids not in `player_state`.
+#[reducer]
+pub fn set_players_offline(ctx: &ReducerContext, entity_ids: Vec<u64>) -> Result<(), String> {
+    ensure_relay(ctx)?;
+    for id in entity_ids {
+        if let Some(mut row) = ctx.db.player_state().entity_id().find(id) {
+            row.online = false;
+            ctx.db.player_state().entity_id().update(row);
+        }
+    }
+    Ok(())
+}
+
+// --- player rename (live-phase delta; no online-state lookup in prism) ---
+
+/// A single player rename update.
+#[derive(SpacetimeType)]
+pub struct PlayerRenameUpdate {
+    pub entity_id: u64,
+    pub name: String,
+}
+
+/// Update only the `name` field of existing `player_state` rows.
+/// No-ops for entity_ids not in `player_state`.
+#[reducer]
+pub fn rename_players(
+    ctx: &ReducerContext,
+    renames: Vec<PlayerRenameUpdate>,
+) -> Result<(), String> {
+    ensure_relay(ctx)?;
+    for r in renames {
+        if let Some(mut row) = ctx.db.player_state().entity_id().find(r.entity_id) {
+            row.name = r.name;
+            ctx.db.player_state().entity_id().update(row);
+        }
+    }
+    Ok(())
+}
 
 #[spacetimedb::http::handler]
 fn players(ctx: &mut HandlerContext, request: Request) -> Response {

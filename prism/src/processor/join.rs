@@ -16,17 +16,20 @@ pub struct JoinState {
 
 #[derive(Default)]
 pub struct RegionJoinState {
-    /// entity_id → resource_id
+    /// entity_id → resource_id (sync phase only; cleared by clear_live_caches)
     pub resource_kind: HashMap<u64, i32>,
-    /// entity_id → enemy_type
+    /// entity_id → enemy_type (sync phase only; cleared by clear_live_caches)
     pub enemy_kind: HashMap<u64, i32>,
-    /// entity_id → username (all players with a known username in this region)
+    /// entity_id → username (sync phase only; cleared by clear_live_caches)
     pub player_username: HashMap<u64, String>,
-    /// set of entity_ids currently signed in (online)
+    /// set of entity_ids currently signed in (sync phase only; cleared by clear_live_caches)
     pub player_signed_in: HashSet<u64>,
-    /// Last known location per entity — only maintained during the Syncing
-    /// phase for snapshot building; cleared immediately after the bulk snapshot
-    /// is emitted so it doesn't grow unboundedly in delta mode.
+    /// set of entity_ids that are players in this region.
+    /// Seeded from player_username.keys() at the sync→live transition, then
+    /// maintained by player_username_state events.  Used in live mode to route
+    /// mobile_entity movements to HistoryMsg without storing usernames.
+    pub player_entity_ids: HashSet<u64>,
+    /// Last known location per entity — sync phase only; cleared by clear_live_caches.
     pub last_location: HashMap<u64, EntityLocation>,
     /// False during initial subscription sync; true once all pipelines are live.
     pub is_live: bool,
@@ -115,10 +118,23 @@ impl RegionJoinState {
             .collect()
     }
 
-    /// Drop the last-location cache — called once the snapshot has been emitted
-    /// so delta mode doesn't maintain stale per-entity location history.
-    pub fn clear_last_location(&mut self) {
-        self.last_location.clear();
+    /// Drop all sync-phase caches and initialize live-phase state.
+    /// Called once after the initial bulk snapshot has been emitted so that
+    /// delta mode carries only the minimal data needed for routing.
+    ///
+    /// Critically, fields are *replaced* (not `.clear()`ed) so that the
+    /// backing heap allocations are freed immediately.  `.clear()` keeps the
+    /// allocation alive at full capacity — for maps that peaked at 4M+ entries
+    /// that is hundreds of MB of retained memory.
+    pub fn clear_live_caches(&mut self) {
+        // Seed player_entity_ids from the username map before dropping it.
+        self.player_entity_ids = self.player_username.keys().copied().collect();
+        // Replace with empty collections — this drops the old allocations.
+        self.resource_kind = HashMap::default();
+        self.enemy_kind = HashMap::default();
+        self.player_username = HashMap::default();
+        self.player_signed_in = HashSet::default();
+        self.last_location = HashMap::default();
     }
 }
 

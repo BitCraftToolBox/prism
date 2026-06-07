@@ -19,12 +19,17 @@ use std::time::Duration;
 
 use anyhow::Result;
 use log::{debug, error, info, warn};
-use relay_bindings::{EnemyLocation, PlayerLocation, PlayerState, ResourceLocation};
+use relay_bindings::{
+    EnemyLocation, MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate, PlayerState,
+    ResourceLocation,
+};
 use tokio::sync::mpsc::Receiver;
 use tokio::time::{Instant, interval_at};
 
 use super::connection::{RECONNECT_DELAY, RelayConnection};
-use super::{EnemyRow, PlayerRow, PlayerStateRow, RelayMsg, ResourceRow};
+use super::{
+    EnemyRow, MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow, RelayMsg, ResourceRow,
+};
 use crate::config::Config;
 use crate::shutdown::SharedShutdown;
 
@@ -49,6 +54,14 @@ struct Batches {
     player_deletes: Vec<u64>,
     player_state_upserts: Vec<PlayerState>,
     player_state_deletes: Vec<u64>,
+    /// Live-phase: location updates for existing entities (relay resolves type).
+    mobile_moves: Vec<MobileMoveUpdate>,
+    /// Live-phase: entity_ids to mark online.
+    player_online_ids: Vec<u64>,
+    /// Live-phase: entity_ids to mark offline.
+    player_offline_ids: Vec<u64>,
+    /// Live-phase: name-only updates for existing player_state rows.
+    player_renames: Vec<PlayerRenameUpdate>,
 }
 
 fn to_resource_location(r: &ResourceRow) -> ResourceLocation {
@@ -82,6 +95,20 @@ fn to_player_state(r: &PlayerStateRow) -> PlayerState {
         entity_id: r.entity_id,
         region_id: r.region_id,
         online: r.online,
+        name: r.name.clone(),
+    }
+}
+fn to_mobile_move_update(r: &MobileMoveRow) -> MobileMoveUpdate {
+    MobileMoveUpdate {
+        entity_id: r.entity_id,
+        region_id: r.region_id,
+        x: r.x,
+        z: r.z,
+    }
+}
+fn to_player_rename_update(r: &PlayerRenameRow) -> PlayerRenameUpdate {
+    PlayerRenameUpdate {
+        entity_id: r.entity_id,
         name: r.name.clone(),
     }
 }
@@ -240,17 +267,25 @@ pub async fn run(
                         batches.enemy_deletes.push(id);
                         if batches.enemy_deletes.len() >= MAX_BATCH { flush_enemy_batch(&conn, &mut batches); }
                     }
-                    RelayMsg::DeletePlayer(id) => {
-                        batches.player_deletes.push(id);
-                        if batches.player_deletes.len() >= MAX_BATCH { flush_player_batch(&conn, &mut batches); }
-                    }
                     RelayMsg::UpsertPlayerState(row) => {
                         batches.player_state_upserts.push(to_player_state(&row));
                         if batches.player_state_upserts.len() >= MAX_BATCH { flush_player_state_batch(&conn, &mut batches); }
                     }
-                    RelayMsg::DeletePlayerState(id) => {
-                        batches.player_state_deletes.push(id);
-                        if batches.player_state_deletes.len() >= MAX_BATCH { flush_player_state_batch(&conn, &mut batches); }
+                    RelayMsg::MoveMobileEntities(moves) => {
+                        batches.mobile_moves.extend(moves.iter().map(to_mobile_move_update));
+                        if batches.mobile_moves.len() >= MAX_BATCH { flush_mobile_moves(&conn, &mut batches); }
+                    }
+                    RelayMsg::SetPlayersOnline(ids) => {
+                        batches.player_online_ids.extend(ids);
+                        if batches.player_online_ids.len() >= MAX_BATCH { flush_player_online(&conn, &mut batches); }
+                    }
+                    RelayMsg::SetPlayersOffline(ids) => {
+                        batches.player_offline_ids.extend(ids);
+                        if batches.player_offline_ids.len() >= MAX_BATCH { flush_player_offline(&conn, &mut batches); }
+                    }
+                    RelayMsg::RenamePlayers(renames) => {
+                        batches.player_renames.extend(renames.iter().map(to_player_rename_update));
+                        if batches.player_renames.len() >= MAX_BATCH { flush_player_renames(&conn, &mut batches); }
                     }
                 }
             }
@@ -259,6 +294,10 @@ pub async fn run(
                 if !ensure_connected(&mut conn, &config, &shutdown).await { break; }
                 flush_player_batch(&conn, &mut batches);
                 flush_player_state_batch(&conn, &mut batches);
+                flush_mobile_moves(&conn, &mut batches);
+                flush_player_online(&conn, &mut batches);
+                flush_player_offline(&conn, &mut batches);
+                flush_player_renames(&conn, &mut batches);
             }
             _ = enemy_tick.tick() => {
                 if !ensure_connected(&mut conn, &config, &shutdown).await { break; }
@@ -276,6 +315,10 @@ pub async fn run(
     flush_enemy_batch(&conn, &mut batches);
     flush_player_batch(&conn, &mut batches);
     flush_player_state_batch(&conn, &mut batches);
+    flush_mobile_moves(&conn, &mut batches);
+    flush_player_online(&conn, &mut batches);
+    flush_player_offline(&conn, &mut batches);
+    flush_player_renames(&conn, &mut batches);
     info!("relay batcher: disconnecting...");
     conn.disconnect();
     Ok(())
@@ -374,6 +417,46 @@ fn flush_player_state_batch(conn: &RelayConnection, batches: &mut Batches) {
         debug!("relay flush: delete_player_states count={}", ids.len());
         if let Err(e) = conn.delete_player_states(ids) {
             warn!("relay: delete_player_states: {e:?}");
+        }
+    }
+}
+
+fn flush_mobile_moves(conn: &RelayConnection, batches: &mut Batches) {
+    if !batches.mobile_moves.is_empty() {
+        let moves = std::mem::take(&mut batches.mobile_moves);
+        debug!("relay flush: move_mobile_entities count={}", moves.len());
+        if let Err(e) = conn.move_mobile_entities(moves) {
+            warn!("relay: move_mobile_entities: {e:?}");
+        }
+    }
+}
+
+fn flush_player_online(conn: &RelayConnection, batches: &mut Batches) {
+    if !batches.player_online_ids.is_empty() {
+        let ids = std::mem::take(&mut batches.player_online_ids);
+        debug!("relay flush: set_players_online count={}", ids.len());
+        if let Err(e) = conn.set_players_online(ids) {
+            warn!("relay: set_players_online: {e:?}");
+        }
+    }
+}
+
+fn flush_player_offline(conn: &RelayConnection, batches: &mut Batches) {
+    if !batches.player_offline_ids.is_empty() {
+        let ids = std::mem::take(&mut batches.player_offline_ids);
+        debug!("relay flush: set_players_offline count={}", ids.len());
+        if let Err(e) = conn.set_players_offline(ids) {
+            warn!("relay: set_players_offline: {e:?}");
+        }
+    }
+}
+
+fn flush_player_renames(conn: &RelayConnection, batches: &mut Batches) {
+    if !batches.player_renames.is_empty() {
+        let renames = std::mem::take(&mut batches.player_renames);
+        debug!("relay flush: rename_players count={}", renames.len());
+        if let Err(e) = conn.rename_players(renames) {
+            warn!("relay: rename_players: {e:?}");
         }
     }
 }

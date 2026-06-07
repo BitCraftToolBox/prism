@@ -16,7 +16,7 @@ use log::{debug, warn};
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, channel};
 
 use crate::config::Config;
-use crate::history::{HistoryMsg, history_capacity};
+use crate::history::{HistoryMsg, history_capacity, history_enabled};
 use crate::relay::{RelayMsg, relay_capacity};
 use crate::shutdown::SharedShutdown;
 use crate::upstream::RegionUpdate;
@@ -25,19 +25,26 @@ use join::JoinState;
 
 pub struct ProcessorSinks {
     pub relay_rx: Receiver<RelayMsg>,
-    pub history_rx: Receiver<HistoryMsg>,
+    /// `None` when history is disabled (no database URL configured).
+    pub history_rx: Option<Receiver<HistoryMsg>>,
 }
 
 pub struct ProcessorHandle {
     pub relay_tx: Sender<RelayMsg>,
-    pub history_tx: Sender<HistoryMsg>,
+    /// `None` when history is disabled; the pipeline drops history messages.
+    pub history_tx: Option<Sender<HistoryMsg>>,
 }
 
 /// Build the two bounded sink channels. Returns (handle for processor task,
 /// receivers for the sinks).
 pub fn channels(config: &Config) -> (ProcessorHandle, ProcessorSinks) {
     let (relay_tx, relay_rx) = channel(relay_capacity(config));
-    let (history_tx, history_rx) = channel(history_capacity(config));
+    let (history_tx, history_rx) = if history_enabled(config) {
+        let (tx, rx) = channel(history_capacity(config));
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
     (
         ProcessorHandle {
             relay_tx,
