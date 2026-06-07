@@ -311,25 +311,25 @@ async fn run_dump_schedule(
         let deadline = tokio::time::sleep(DUMP_TIMEOUT);
         tokio::pin!(deadline);
 
-        'recv: loop {
-            tokio::select! {
-                biased;
-                _ = &mut shutdown_signal => {
-                    info!("[{}] dump: shutdown signal received, terminating dump", module_name);
-                    break 'recv;
+        // We only expect a single InitialSubscription message: one subscription covers
+        // all queries, so all rows for all tables arrive in one update.  Wait for that
+        // message, a timeout, or a shutdown signal — then fall through to teardown.
+        tokio::select! {
+            biased;
+            _ = &mut shutdown_signal => {
+                info!("[{}] dump: shutdown signal received, terminating dump", module_name);
+            }
+            _ = &mut deadline => {
+                if !pending.is_empty() {
+                    let names: Vec<&str> = pending.keys().map(|t| t.as_str()).collect();
+                    warn!(
+                        "[{}] dump: timed out waiting for tables {:?} (no rows?)",
+                        module_name, names
+                    );
                 }
-                _ = &mut deadline => {
-                    if !pending.is_empty() {
-                        let names: Vec<&str> = pending.keys().map(|t| t.as_str()).collect();
-                        warn!(
-                            "[{}] dump: timed out waiting for tables {:?} (no rows?)",
-                            module_name, names
-                        );
-                    }
-                    break 'recv;
-                }
-                upd = cache_rx.recv() => {
-                    let Some(upd) = upd else { break 'recv; };
+            }
+            upd = cache_rx.recv() => {
+                if let Some(upd) = upd {
                     let arrived: Vec<SupportedTable> = pending
                         .keys()
                         .copied()
@@ -359,10 +359,6 @@ async fn run_dump_schedule(
                         let names: Vec<&str> = pending.keys().map(|t| t.as_str()).collect();
                         info!("[{}] dump: subscription received with no rows for tables: {:?}", module_name, names);
                     }
-                    // we only expect a single message since we only sent one subscription (with multiple queries)
-                    // if we got an InitialSubscription update at all, it contains all rows for all queries
-                    // any tables without rows in this initial message did not have matching rows at all
-                    break 'recv;
                 }
             }
         }

@@ -115,7 +115,10 @@ fn to_player_rename_update(r: &PlayerRenameRow) -> PlayerRenameUpdate {
 
 /// Attempt to connect, retrying with backoff until successful or shutdown.
 /// Returns `None` if shutdown was triggered before a connection was made.
-async fn connect_with_retry(relay: &RelayConfig, shutdown: &SharedShutdown) -> Option<RelayConnection> {
+async fn connect_with_retry(
+    relay: &RelayConfig,
+    shutdown: &SharedShutdown,
+) -> Option<RelayConnection> {
     loop {
         match RelayConnection::connect(relay).await {
             Ok(c) => return Some(c),

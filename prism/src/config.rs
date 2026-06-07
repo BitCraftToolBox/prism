@@ -97,16 +97,10 @@ pub struct RelayConfig {
     pub token: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct DatabaseConfig {
     #[serde(default)]
     pub url: Option<String>,
-}
-
-impl Default for DatabaseConfig {
-    fn default() -> Self {
-        Self { url: None }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -166,10 +160,10 @@ impl Config {
         if let Ok(t) = std::env::var("PRISM_UPSTREAM_TOKEN") {
             self.upstream.default_token = Some(t);
         }
-        if let Ok(t) = std::env::var("PRISM_RELAY_TOKEN") {
-            if let Some(ref mut relay) = self.relay {
-                relay.token = Some(t);
-            }
+        if let Ok(t) = std::env::var("PRISM_RELAY_TOKEN")
+            && let Some(ref mut relay) = self.relay
+        {
+            relay.token = Some(t);
         }
         if let Ok(u) = std::env::var("DATABASE_URL") {
             self.database.url = Some(u);

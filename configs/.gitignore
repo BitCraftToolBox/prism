@@ -1,2 +1,5 @@
 *.toml
 *.yml
+*.sh
+# generic
+!cartographer.toml

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["prism", "relay-bindings"]
+members = ["prism", "relay-bindings", "prism-cartographer"]
 # `relay-module` is its own workspace (excluded so it can be published/built standalone).
 exclude = ["relay-module"]
 

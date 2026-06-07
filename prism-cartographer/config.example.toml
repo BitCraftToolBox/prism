@@ -1,0 +1,28 @@
+# Directory containing per-region subdirectories produced by the dumper.
+input_dir = "dumps"
+
+# Prefix used to form region directory names: "{input_dir}/{region_prefix}{N}/"
+# e.g. region 7 → "dumps/bitcraft-live-7/"
+region_prefix = "bitcraft-live-"
+
+# Root directory for all rendered output.
+output_dir = "output"
+
+# ── scheduled tasks ───────────────────────────────────────────────────────────
+# Cron expressions use 6 fields: sec  min  hour  dom  month  dow
+# Examples:
+#   "0 0 * * * *"    — every hour, on the hour
+#   "0 */10 * * * *" — every 10 minutes
+
+[[tasks]]
+renderer = "terrain"
+schedule = "0 0 * * * *"
+
+[[tasks]]
+renderer = "game"
+schedule = "0 0 * * * *"
+
+[[tasks]]
+renderer = "roads"
+schedule = "0 */10 * * * *"
+

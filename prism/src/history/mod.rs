@@ -26,7 +26,7 @@ pub fn history_enabled(config: &Config) -> bool {
         .database
         .url
         .as_ref()
-        .map_or(false, |url| !url.is_empty())
+        .is_some_and(|url| !url.is_empty())
 }
 
 const FLUSH_INTERVAL_MS: u64 = 5000;

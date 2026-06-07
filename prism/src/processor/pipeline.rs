@@ -408,10 +408,10 @@ fn emit_deltas(
         );
     }
     for msg in history_msgs {
-        if let Some(tx) = &sinks.history_tx {
-            if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = tx.try_send(msg) {
-                warn!("history channel full — dropping player location sample");
-            }
+        if let Some(tx) = &sinks.history_tx
+            && let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = tx.try_send(msg)
+        {
+            warn!("history channel full — dropping player location sample");
         }
     }
 }

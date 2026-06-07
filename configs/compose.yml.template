@@ -7,7 +7,15 @@ x-common: &common
       condition: service_started
   env_file: "config/prism/env"
 
-services:$SERVICE$
+services:
+  prism-cartographer:
+    container_name: cartographer
+    image: ghcr.io/bitcrafttoolbox/prism-cartographer:latest
+    volumes:
+      - ./config/prism/cartographer.toml:/etc/cartographer/config.toml:ro
+      - ./data/prism:/data/input
+      - ./data/www:/data/output
+$SERVICE$
   prism-$GROUP$:
     container_name: $NAME$
     volumes:

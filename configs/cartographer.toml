@@ -1,0 +1,14 @@
+input_dir = "/data/input"
+output_dir = "/data/output"
+
+[[tasks]]
+renderer = "terrain"
+schedule = "0 40 4 * * *" # daily, offset ~30 min from the terrain dump tasks
+
+[[tasks]]
+renderer = "game"
+schedule = "0 50 4 * * *" # daily, staggered after terrain
+
+[[tasks]]
+renderer = "roads"
+schedule = "0 30 * * * *" # hourly, shortly after all paving dump tasks
