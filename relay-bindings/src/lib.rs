@@ -17,6 +17,8 @@ pub mod delete_resources_reducer;
 pub mod enemy_location_table;
 pub mod enemy_location_type;
 pub mod init_relay_reducer;
+pub mod insert_enemies_reducer;
+pub mod insert_resources_reducer;
 pub mod mobile_move_update_type;
 pub mod move_mobile_entities_reducer;
 pub mod player_location_table;
@@ -30,10 +32,8 @@ pub mod resource_location_table;
 pub mod resource_location_type;
 pub mod set_players_offline_reducer;
 pub mod set_players_online_reducer;
-pub mod upsert_enemies_reducer;
 pub mod upsert_player_states_reducer;
 pub mod upsert_players_reducer;
-pub mod upsert_resources_reducer;
 
 pub use bulk_replace_enemies_reducer::bulk_replace_enemies;
 pub use bulk_replace_player_states_reducer::bulk_replace_player_states;
@@ -46,6 +46,8 @@ pub use delete_resources_reducer::delete_resources;
 pub use enemy_location_table::*;
 pub use enemy_location_type::EnemyLocation;
 pub use init_relay_reducer::init_relay;
+pub use insert_enemies_reducer::insert_enemies;
+pub use insert_resources_reducer::insert_resources;
 pub use mobile_move_update_type::MobileMoveUpdate;
 pub use move_mobile_entities_reducer::move_mobile_entities;
 pub use player_location_table::*;
@@ -59,10 +61,8 @@ pub use resource_location_table::*;
 pub use resource_location_type::ResourceLocation;
 pub use set_players_offline_reducer::set_players_offline;
 pub use set_players_online_reducer::set_players_online;
-pub use upsert_enemies_reducer::upsert_enemies;
 pub use upsert_player_states_reducer::upsert_player_states;
 pub use upsert_players_reducer::upsert_players;
-pub use upsert_resources_reducer::upsert_resources;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -105,6 +105,12 @@ pub enum Reducer {
         entity_ids: Vec<u64>,
     },
     InitRelay,
+    InsertEnemies {
+        rows: Vec<EnemyLocation>,
+    },
+    InsertResources {
+        rows: Vec<ResourceLocation>,
+    },
     MoveMobileEntities {
         moves: Vec<MobileMoveUpdate>,
     },
@@ -117,17 +123,11 @@ pub enum Reducer {
     SetPlayersOnline {
         entity_ids: Vec<u64>,
     },
-    UpsertEnemies {
-        rows: Vec<EnemyLocation>,
-    },
     UpsertPlayerStates {
         rows: Vec<PlayerState>,
     },
     UpsertPlayers {
         rows: Vec<PlayerLocation>,
-    },
-    UpsertResources {
-        rows: Vec<ResourceLocation>,
     },
 }
 
@@ -147,14 +147,14 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeletePlayers { .. } => "delete_players",
             Reducer::DeleteResources { .. } => "delete_resources",
             Reducer::InitRelay => "init_relay",
+            Reducer::InsertEnemies { .. } => "insert_enemies",
+            Reducer::InsertResources { .. } => "insert_resources",
             Reducer::MoveMobileEntities { .. } => "move_mobile_entities",
             Reducer::RenamePlayers { .. } => "rename_players",
             Reducer::SetPlayersOffline { .. } => "set_players_offline",
             Reducer::SetPlayersOnline { .. } => "set_players_online",
-            Reducer::UpsertEnemies { .. } => "upsert_enemies",
             Reducer::UpsertPlayerStates { .. } => "upsert_player_states",
             Reducer::UpsertPlayers { .. } => "upsert_players",
-            Reducer::UpsertResources { .. } => "upsert_resources",
             _ => unreachable!(),
         }
     }
@@ -220,6 +220,16 @@ impl __sdk::Reducer for Reducer {
                 })
             }
             Reducer::InitRelay => __sats::bsatn::to_vec(&init_relay_reducer::InitRelayArgs {}),
+            Reducer::InsertEnemies { rows } => {
+                __sats::bsatn::to_vec(&insert_enemies_reducer::InsertEnemiesArgs {
+                    rows: rows.clone(),
+                })
+            }
+            Reducer::InsertResources { rows } => {
+                __sats::bsatn::to_vec(&insert_resources_reducer::InsertResourcesArgs {
+                    rows: rows.clone(),
+                })
+            }
             Reducer::MoveMobileEntities { moves } => {
                 __sats::bsatn::to_vec(&move_mobile_entities_reducer::MoveMobileEntitiesArgs {
                     moves: moves.clone(),
@@ -240,11 +250,6 @@ impl __sdk::Reducer for Reducer {
                     entity_ids: entity_ids.clone(),
                 })
             }
-            Reducer::UpsertEnemies { rows } => {
-                __sats::bsatn::to_vec(&upsert_enemies_reducer::UpsertEnemiesArgs {
-                    rows: rows.clone(),
-                })
-            }
             Reducer::UpsertPlayerStates { rows } => {
                 __sats::bsatn::to_vec(&upsert_player_states_reducer::UpsertPlayerStatesArgs {
                     rows: rows.clone(),
@@ -252,11 +257,6 @@ impl __sdk::Reducer for Reducer {
             }
             Reducer::UpsertPlayers { rows } => {
                 __sats::bsatn::to_vec(&upsert_players_reducer::UpsertPlayersArgs {
-                    rows: rows.clone(),
-                })
-            }
-            Reducer::UpsertResources { rows } => {
-                __sats::bsatn::to_vec(&upsert_resources_reducer::UpsertResourcesArgs {
                     rows: rows.clone(),
                 })
             }

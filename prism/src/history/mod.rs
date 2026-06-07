@@ -52,7 +52,11 @@ pub async fn run(
         return Ok(());
     };
     // history_enabled was checked in channels(); url is guaranteed non-empty here.
-    let url = config.database.url.as_ref().expect("history enabled but no database url");
+    let url = config
+        .database
+        .url
+        .as_ref()
+        .expect("history enabled but no database url");
     info!("history: connecting to database...");
     let pool = PgPoolOptions::new()
         .max_connections(4)

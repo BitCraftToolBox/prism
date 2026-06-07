@@ -8,42 +8,42 @@ use super::resource_location_type::ResourceLocation;
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub(super) struct UpsertResourcesArgs {
+pub(super) struct InsertResourcesArgs {
     pub rows: Vec<ResourceLocation>,
 }
 
-impl From<UpsertResourcesArgs> for super::Reducer {
-    fn from(args: UpsertResourcesArgs) -> Self {
-        Self::UpsertResources { rows: args.rows }
+impl From<InsertResourcesArgs> for super::Reducer {
+    fn from(args: InsertResourcesArgs) -> Self {
+        Self::InsertResources { rows: args.rows }
     }
 }
 
-impl __sdk::InModule for UpsertResourcesArgs {
+impl __sdk::InModule for InsertResourcesArgs {
     type Module = super::RemoteModule;
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `upsert_resources`.
+/// Extension trait for access to the reducer `insert_resources`.
 ///
 /// Implemented for [`super::RemoteReducers`].
-pub trait upsert_resources {
-    /// Request that the remote module invoke the reducer `upsert_resources` to run as soon as possible.
+pub trait insert_resources {
+    /// Request that the remote module invoke the reducer `insert_resources` to run as soon as possible.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`upsert_resources:upsert_resources_then`] to run a callback after the reducer completes.
-    fn upsert_resources(&self, rows: Vec<ResourceLocation>) -> __sdk::Result<()> {
-        self.upsert_resources_then(rows, |_, _| {})
+    /// /// Use [`insert_resources:insert_resources_then`] to run a callback after the reducer completes.
+    fn insert_resources(&self, rows: Vec<ResourceLocation>) -> __sdk::Result<()> {
+        self.insert_resources_then(rows, |_, _| {})
     }
 
-    /// Request that the remote module invoke the reducer `upsert_resources` to run as soon as possible,
+    /// Request that the remote module invoke the reducer `insert_resources` to run as soon as possible,
     /// registering `callback` to run when we are notified that the reducer completed.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and its status can be observed with the `callback`.
-    fn upsert_resources_then(
+    fn insert_resources_then(
         &self,
         rows: Vec<ResourceLocation>,
 
@@ -53,8 +53,8 @@ pub trait upsert_resources {
     ) -> __sdk::Result<()>;
 }
 
-impl upsert_resources for super::RemoteReducers {
-    fn upsert_resources_then(
+impl insert_resources for super::RemoteReducers {
+    fn insert_resources_then(
         &self,
         rows: Vec<ResourceLocation>,
 
@@ -63,6 +63,6 @@ impl upsert_resources for super::RemoteReducers {
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp
-            .invoke_reducer_with_callback(UpsertResourcesArgs { rows }, callback)
+            .invoke_reducer_with_callback(InsertResourcesArgs { rows }, callback)
     }
 }

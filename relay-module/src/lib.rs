@@ -117,10 +117,10 @@ pub fn bulk_replace_resources(
 }
 
 #[reducer]
-pub fn upsert_resources(ctx: &ReducerContext, rows: Vec<ResourceLocation>) -> Result<(), String> {
+pub fn insert_resources(ctx: &ReducerContext, rows: Vec<ResourceLocation>) -> Result<(), String> {
     ensure_relay(ctx)?;
     for row in rows {
-        ctx.db.resource_location().entity_id().insert_or_update(row);
+        ctx.db.resource_location().insert(row);
     }
     Ok(())
 }
@@ -158,10 +158,10 @@ pub fn bulk_replace_enemies(
 }
 
 #[reducer]
-pub fn upsert_enemies(ctx: &ReducerContext, rows: Vec<EnemyLocation>) -> Result<(), String> {
+pub fn insert_enemies(ctx: &ReducerContext, rows: Vec<EnemyLocation>) -> Result<(), String> {
     ensure_relay(ctx)?;
     for row in rows {
-        ctx.db.enemy_location().entity_id().insert_or_update(row);
+        ctx.db.enemy_location().insert(row);
     }
     Ok(())
 }

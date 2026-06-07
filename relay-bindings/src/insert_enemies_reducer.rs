@@ -8,42 +8,42 @@ use super::enemy_location_type::EnemyLocation;
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub(super) struct UpsertEnemiesArgs {
+pub(super) struct InsertEnemiesArgs {
     pub rows: Vec<EnemyLocation>,
 }
 
-impl From<UpsertEnemiesArgs> for super::Reducer {
-    fn from(args: UpsertEnemiesArgs) -> Self {
-        Self::UpsertEnemies { rows: args.rows }
+impl From<InsertEnemiesArgs> for super::Reducer {
+    fn from(args: InsertEnemiesArgs) -> Self {
+        Self::InsertEnemies { rows: args.rows }
     }
 }
 
-impl __sdk::InModule for UpsertEnemiesArgs {
+impl __sdk::InModule for InsertEnemiesArgs {
     type Module = super::RemoteModule;
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `upsert_enemies`.
+/// Extension trait for access to the reducer `insert_enemies`.
 ///
 /// Implemented for [`super::RemoteReducers`].
-pub trait upsert_enemies {
-    /// Request that the remote module invoke the reducer `upsert_enemies` to run as soon as possible.
+pub trait insert_enemies {
+    /// Request that the remote module invoke the reducer `insert_enemies` to run as soon as possible.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`upsert_enemies:upsert_enemies_then`] to run a callback after the reducer completes.
-    fn upsert_enemies(&self, rows: Vec<EnemyLocation>) -> __sdk::Result<()> {
-        self.upsert_enemies_then(rows, |_, _| {})
+    /// /// Use [`insert_enemies:insert_enemies_then`] to run a callback after the reducer completes.
+    fn insert_enemies(&self, rows: Vec<EnemyLocation>) -> __sdk::Result<()> {
+        self.insert_enemies_then(rows, |_, _| {})
     }
 
-    /// Request that the remote module invoke the reducer `upsert_enemies` to run as soon as possible,
+    /// Request that the remote module invoke the reducer `insert_enemies` to run as soon as possible,
     /// registering `callback` to run when we are notified that the reducer completed.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and its status can be observed with the `callback`.
-    fn upsert_enemies_then(
+    fn insert_enemies_then(
         &self,
         rows: Vec<EnemyLocation>,
 
@@ -53,8 +53,8 @@ pub trait upsert_enemies {
     ) -> __sdk::Result<()>;
 }
 
-impl upsert_enemies for super::RemoteReducers {
-    fn upsert_enemies_then(
+impl insert_enemies for super::RemoteReducers {
+    fn insert_enemies_then(
         &self,
         rows: Vec<EnemyLocation>,
 
@@ -63,6 +63,6 @@ impl upsert_enemies for super::RemoteReducers {
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp
-            .invoke_reducer_with_callback(UpsertEnemiesArgs { rows }, callback)
+            .invoke_reducer_with_callback(InsertEnemiesArgs { rows }, callback)
     }
 }

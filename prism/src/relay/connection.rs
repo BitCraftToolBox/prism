@@ -16,11 +16,11 @@ use relay_bindings::{
     bulk_replace_resources_reducer::bulk_replace_resources, delete_enemies_reducer::delete_enemies,
     delete_player_states_reducer::delete_player_states, delete_players_reducer::delete_players,
     delete_resources_reducer::delete_resources, init_relay_reducer::init_relay,
+    insert_enemies_reducer::insert_enemies, insert_resources_reducer::insert_resources,
     move_mobile_entities_reducer::move_mobile_entities, rename_players_reducer::rename_players,
     set_players_offline_reducer::set_players_offline,
-    set_players_online_reducer::set_players_online, upsert_enemies_reducer::upsert_enemies,
+    set_players_online_reducer::set_players_online,
     upsert_player_states_reducer::upsert_player_states, upsert_players_reducer::upsert_players,
-    upsert_resources_reducer::upsert_resources,
 };
 use relay_sdk::DbContext;
 use tokio::sync::oneshot;
@@ -151,17 +151,17 @@ impl RelayConnection {
             .map_err(|e| anyhow!("{e:?}"))
     }
 
-    pub fn upsert_resources(&self, rows: Vec<ResourceLocation>) -> Result<()> {
+    pub fn insert_resources(&self, rows: Vec<ResourceLocation>) -> Result<()> {
         self.conn
             .reducers
-            .upsert_resources(rows)
+            .insert_resources(rows)
             .map_err(|e| anyhow!("{e:?}"))
     }
 
-    pub fn upsert_enemies(&self, rows: Vec<EnemyLocation>) -> Result<()> {
+    pub fn insert_enemies(&self, rows: Vec<EnemyLocation>) -> Result<()> {
         self.conn
             .reducers
-            .upsert_enemies(rows)
+            .insert_enemies(rows)
             .map_err(|e| anyhow!("{e:?}"))
     }
 

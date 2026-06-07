@@ -46,9 +46,9 @@ const BULK_REPLACE_CHUNK: usize = 500_000;
 
 #[derive(Default)]
 struct Batches {
-    resource_upserts: Vec<ResourceLocation>,
+    resource_inserts: Vec<ResourceLocation>,
     resource_deletes: Vec<u64>,
-    enemy_upserts: Vec<EnemyLocation>,
+    enemy_inserts: Vec<EnemyLocation>,
     enemy_deletes: Vec<u64>,
     player_upserts: Vec<PlayerLocation>,
     player_deletes: Vec<u64>,
@@ -205,7 +205,7 @@ pub async fn run(
                 match msg {
                     // Bulk replace: clear region then insert in chunks.
                     // First chunk uses bulk_replace_* (which deletes existing rows for
-                    // the region first); subsequent chunks use upsert_* so we don't
+                    // the region first); subsequent chunks use insert_* so we don't
                     // wipe what we just inserted.
                     RelayMsg::ReplaceResources { region_id, rows } => {
                         flush_resource_batch(&conn, &mut batches);
@@ -213,7 +213,7 @@ pub async fn run(
                         bulk_replace_chunked(
                             relay_rows,
                             |chunk| conn.bulk_replace_resources(region_id, chunk, rows.len() as u32),
-                            |chunk| conn.upsert_resources(chunk),
+                            |chunk| conn.insert_resources(chunk),
                             "resources",
                         );
                     }
@@ -223,7 +223,7 @@ pub async fn run(
                         bulk_replace_chunked(
                             relay_rows,
                             |chunk| conn.bulk_replace_enemies(region_id, chunk, rows.len() as u32),
-                            |chunk| conn.upsert_enemies(chunk),
+                            |chunk| conn.insert_enemies(chunk),
                             "enemies",
                         );
                     }
@@ -247,13 +247,13 @@ pub async fn run(
                             "player_states",
                         );
                     }
-                    RelayMsg::UpsertResource(row) => {
-                        batches.resource_upserts.push(to_resource_location(&row));
-                        if batches.resource_upserts.len() >= MAX_BATCH { flush_resource_batch(&conn, &mut batches); }
+                    RelayMsg::InsertResource(row) => {
+                        batches.resource_inserts.push(to_resource_location(&row));
+                        if batches.resource_inserts.len() >= MAX_BATCH { flush_resource_batch(&conn, &mut batches); }
                     }
-                    RelayMsg::UpsertEnemy(row) => {
-                        batches.enemy_upserts.push(to_enemy_location(&row));
-                        if batches.enemy_upserts.len() >= MAX_BATCH { flush_enemy_batch(&conn, &mut batches); }
+                    RelayMsg::InsertEnemy(row) => {
+                        batches.enemy_inserts.push(to_enemy_location(&row));
+                        if batches.enemy_inserts.len() >= MAX_BATCH { flush_enemy_batch(&conn, &mut batches); }
                     }
                     RelayMsg::UpsertPlayer(row) => {
                         batches.player_upserts.push(to_player_location(&row));
@@ -354,11 +354,11 @@ where
 }
 
 fn flush_resource_batch(conn: &RelayConnection, batches: &mut Batches) {
-    if !batches.resource_upserts.is_empty() {
-        let rows = std::mem::take(&mut batches.resource_upserts);
-        debug!("relay flush: upsert_resources count={}", rows.len());
-        if let Err(e) = conn.upsert_resources(rows) {
-            warn!("relay: upsert_resources: {e:?}");
+    if !batches.resource_inserts.is_empty() {
+        let rows = std::mem::take(&mut batches.resource_inserts);
+        debug!("relay flush: insert_resources count={}", rows.len());
+        if let Err(e) = conn.insert_resources(rows) {
+            warn!("relay: insert_resources: {e:?}");
         }
     }
     if !batches.resource_deletes.is_empty() {
@@ -371,11 +371,11 @@ fn flush_resource_batch(conn: &RelayConnection, batches: &mut Batches) {
 }
 
 fn flush_enemy_batch(conn: &RelayConnection, batches: &mut Batches) {
-    if !batches.enemy_upserts.is_empty() {
-        let rows = std::mem::take(&mut batches.enemy_upserts);
-        debug!("relay flush: upsert_enemies count={}", rows.len());
-        if let Err(e) = conn.upsert_enemies(rows) {
-            warn!("relay: upsert_enemies: {e:?}");
+    if !batches.enemy_inserts.is_empty() {
+        let rows = std::mem::take(&mut batches.enemy_inserts);
+        debug!("relay flush: insert_enemies count={}", rows.len());
+        if let Err(e) = conn.insert_enemies(rows) {
+            warn!("relay: insert_enemies: {e:?}");
         }
     }
     if !batches.enemy_deletes.is_empty() {

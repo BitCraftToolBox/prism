@@ -39,8 +39,8 @@ pub enum RelayMsg {
         rows: Vec<PlayerStateRow>,
     },
 
-    UpsertResource(ResourceRow),
-    UpsertEnemy(EnemyRow),
+    InsertResource(ResourceRow),
+    InsertEnemy(EnemyRow),
     UpsertPlayer(PlayerRow),
     UpsertPlayerState(PlayerStateRow),
 

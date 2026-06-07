@@ -363,7 +363,7 @@ fn emit_deltas(
     );
     send_relay(
         &sinks.relay_tx,
-        resource_upserts.into_iter().map(RelayMsg::UpsertResource),
+        resource_upserts.into_iter().map(RelayMsg::InsertResource),
     );
     send_relay(
         &sinks.relay_tx,
@@ -371,7 +371,7 @@ fn emit_deltas(
     );
     send_relay(
         &sinks.relay_tx,
-        enemy_upserts.into_iter().map(RelayMsg::UpsertEnemy),
+        enemy_upserts.into_iter().map(RelayMsg::InsertEnemy),
     );
     send_relay(
         &sinks.relay_tx,
