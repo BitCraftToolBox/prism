@@ -30,7 +30,7 @@ use super::connection::{RECONNECT_DELAY, RelayConnection};
 use super::{
     EnemyRow, MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow, RelayMsg, ResourceRow,
 };
-use crate::config::Config;
+use crate::config::{Config, RelayConfig};
 use crate::shutdown::SharedShutdown;
 
 const PLAYER_FLUSH_MS: u64 = 500;
@@ -115,9 +115,9 @@ fn to_player_rename_update(r: &PlayerRenameRow) -> PlayerRenameUpdate {
 
 /// Attempt to connect, retrying with backoff until successful or shutdown.
 /// Returns `None` if shutdown was triggered before a connection was made.
-async fn connect_with_retry(config: &Config, shutdown: &SharedShutdown) -> Option<RelayConnection> {
+async fn connect_with_retry(relay: &RelayConfig, shutdown: &SharedShutdown) -> Option<RelayConnection> {
     loop {
-        match RelayConnection::connect(&config.relay).await {
+        match RelayConnection::connect(relay).await {
             Ok(c) => return Some(c),
             Err(e) => {
                 error!("relay batcher: connection failed: {e:?}; retrying in {RECONNECT_DELAY:?}");
@@ -135,14 +135,14 @@ async fn connect_with_retry(config: &Config, shutdown: &SharedShutdown) -> Optio
 /// Returns `false` if shutdown was triggered and the caller should exit.
 async fn ensure_connected(
     conn: &mut RelayConnection,
-    config: &Config,
+    relay: &RelayConfig,
     shutdown: &SharedShutdown,
 ) -> bool {
     if conn.is_active() {
         return true;
     }
     warn!("relay batcher: connection lost, reconnecting...");
-    match connect_with_retry(config, shutdown).await {
+    match connect_with_retry(relay, shutdown).await {
         Some(new_conn) => {
             let old = std::mem::replace(conn, new_conn);
             old.disconnect();
@@ -160,7 +160,14 @@ pub async fn run(
 ) -> Result<()> {
     info!("relay batcher: starting");
 
-    let Some(initial) = connect_with_retry(&config, &shutdown).await else {
+    // Safety: validated at config-load time — relay config is always present
+    // when any pipeline is enabled, and run() is only called in that case.
+    let relay = config
+        .relay
+        .as_ref()
+        .expect("relay config required when pipelines are enabled");
+
+    let Some(initial) = connect_with_retry(relay, &shutdown).await else {
         return Ok(());
     };
     let mut conn = initial;
@@ -291,7 +298,7 @@ pub async fn run(
             }
 
             _ = player_tick.tick() => {
-                if !ensure_connected(&mut conn, &config, &shutdown).await { break; }
+                if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
                 flush_player_batch(&conn, &mut batches);
                 flush_player_state_batch(&conn, &mut batches);
                 flush_mobile_moves(&conn, &mut batches);
@@ -300,11 +307,11 @@ pub async fn run(
                 flush_player_renames(&conn, &mut batches);
             }
             _ = enemy_tick.tick() => {
-                if !ensure_connected(&mut conn, &config, &shutdown).await { break; }
+                if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
                 flush_enemy_batch(&conn, &mut batches);
             }
             _ = resource_tick.tick() => {
-                if !ensure_connected(&mut conn, &config, &shutdown).await { break; }
+                if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
                 flush_resource_batch(&conn, &mut batches);
             }
         }

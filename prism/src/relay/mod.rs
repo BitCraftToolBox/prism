@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use log::info;
 use tokio::sync::mpsc::Receiver;
 
 use crate::config::Config;
@@ -111,5 +112,9 @@ pub async fn run(
     rx: Receiver<RelayMsg>,
     shutdown: SharedShutdown,
 ) -> Result<()> {
+    if !config.pipelines.any_enabled() {
+        info!("relay: no pipelines enabled, skipping relay subsystem");
+        return Ok(());
+    }
     batcher::run(config, rx, shutdown).await
 }

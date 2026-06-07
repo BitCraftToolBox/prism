@@ -28,7 +28,7 @@ async fn main() -> Result<()> {
     info!(
         "config loaded: regions={} relay_module={}",
         config.upstream.regions.len(),
-        config.relay.module,
+        config.relay.as_ref().map_or("none", |r| r.module.as_str()),
     );
 
     let shutdown = shutdown::Shutdown::new();

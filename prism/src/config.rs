@@ -8,7 +8,10 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub upstream: UpstreamConfig,
-    pub relay: RelayConfig,
+    /// Downstream relay module connection. Required when any pipeline is
+    /// enabled; may be omitted when running in history- or dumper- only mode.
+    #[serde(default)]
+    pub relay: Option<RelayConfig>,
     #[serde(default)]
     pub database: DatabaseConfig,
     #[serde(default)]
@@ -116,6 +119,14 @@ pub struct PipelinesConfig {
     pub players: bool,
 }
 
+impl PipelinesConfig {
+    /// Returns `true` if at least one pipeline is enabled and will emit
+    /// messages to the relay sink.
+    pub fn any_enabled(&self) -> bool {
+        self.resources || self.enemies || self.players
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct DumperConfig {
     /// Directory to write snapshot files into. Defaults to `"/data"`.
@@ -156,7 +167,9 @@ impl Config {
             self.upstream.default_token = Some(t);
         }
         if let Ok(t) = std::env::var("PRISM_RELAY_TOKEN") {
-            self.relay.token = Some(t);
+            if let Some(ref mut relay) = self.relay {
+                relay.token = Some(t);
+            }
         }
         if let Ok(u) = std::env::var("DATABASE_URL") {
             self.database.url = Some(u);
@@ -175,10 +188,21 @@ impl Config {
                 ));
             }
         }
-        if self.relay.token.is_none() {
-            return Err(anyhow!(
-                "relay has no token; use config.toml or PRISM_RELAY_TOKEN env var"
-            ));
+        if self.pipelines.any_enabled() {
+            match &self.relay {
+                None => {
+                    return Err(anyhow!(
+                        "one or more pipelines are enabled but [relay] is not configured; \
+                         add a [relay] section or disable all pipelines"
+                    ));
+                }
+                Some(relay) if relay.token.is_none() => {
+                    return Err(anyhow!(
+                        "relay has no token; use config.toml or PRISM_RELAY_TOKEN env var"
+                    ));
+                }
+                _ => {}
+            }
         }
         Ok(())
     }
