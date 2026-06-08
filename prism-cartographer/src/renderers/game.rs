@@ -8,8 +8,9 @@ use flate2::read::GzDecoder;
 use image::{ImageBuffer, Rgb, Rgba};
 use std::io::Read;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 
-use crate::tile_generator;
+use crate::tile_generator::{self, check_canceled};
 
 const URL_ROOT: &str = "https://maps.game.bitcraftonline.com/world-maps";
 const MAP_NAME: &str = "TerrainMap";
@@ -31,13 +32,13 @@ const RENDER_SIZE: u32 = 38400;
 /// Render the game-style map by downloading `TerrainMap.gwm` from the Bitcraft
 /// map server and producing a WebP tile pyramid.
 ///
-/// Output: `{output_dir}/maps/game/tiles/{z}/{x}/{y}.webp`
-pub fn render(output_dir: &Path) -> Result<()> {
-    let tiles_dir = output_dir.join("maps").join("game").join("tiles");
-    std::fs::create_dir_all(&tiles_dir)
+/// Tiles are written directly into `tiles_dir` (`{z}/{x}/{y}.webp`).
+pub fn render(tiles_dir: &Path, canceled: &AtomicBool) -> Result<()> {
+    std::fs::create_dir_all(tiles_dir)
         .with_context(|| format!("Failed to create {}", tiles_dir.display()))?;
 
     let data = download_gwm(MAP_NAME)?;
+    check_canceled(canceled)?;
 
     let width = MAP_SIZE;
     let height = MAP_SIZE;
@@ -95,7 +96,7 @@ pub fn render(output_dir: &Path) -> Result<()> {
         });
 
     log::info!("[game] generating tile pyramid → {}", tiles_dir.display());
-    tile_generator::generate_tiles(&tiling_rgba, &tiles_dir)?;
+    tile_generator::generate_tiles(&tiling_rgba, tiles_dir, canceled)?;
 
     log::info!("[game] done");
     Ok(())

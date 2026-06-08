@@ -9,7 +9,7 @@ name = "prism-cartographer"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

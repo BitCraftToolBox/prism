@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use image::{ImageBuffer, Rgba, RgbaImage};
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const SQRT_3: f64 = 1.7320508075688772;
 const CRS_APOTHEM: f64 = 2.0 / SQRT_3;
@@ -31,15 +32,21 @@ fn get_tile_range(crs_zoom: i32) -> TileRange {
 /// Generate a Leaflet-compatible WebP tile pyramid from a full-resolution
 /// RGBA image buffer.
 ///
+/// Checks `canceled` at the start of each zoom level and each tile column;
+/// returns an error immediately if it is set.
+///
 /// Output: `{output_dir}/{zoom}/{x}/{y}.webp`
 pub fn generate_tiles(
     img: &ImageBuffer<Rgba<u8>, Vec<u8>>,
     output_dir: &std::path::Path,
+    canceled: &AtomicBool,
 ) -> Result<()> {
     let (img_w, img_h) = img.dimensions();
     let mut total = 0u32;
 
     for crs_zoom in MIN_ZOOM..=MAX_ZOOM {
+        check_canceled(canceled)?;
+
         let scale = 2.0_f64.powi(crs_zoom);
         let range = get_tile_range(crs_zoom);
 
@@ -66,6 +73,8 @@ pub fn generate_tiles(
 
         let mut count = 0u32;
         for tx in range.x_min..=range.x_max {
+            check_canceled(canceled)?;
+
             let col_dir = output_dir.join(format!("{}/{}", crs_zoom, tx));
             fs::create_dir_all(&col_dir)
                 .with_context(|| format!("Failed to create tile dir: {}", col_dir.display()))?;
@@ -106,17 +115,12 @@ pub fn generate_tiles_from_raw(
     width: u32,
     height: u32,
     output_dir: &std::path::Path,
+    canceled: &AtomicBool,
 ) -> Result<()> {
-    let img: ImageBuffer<Rgba<u8>, &[u8]> = ImageBuffer::from_raw(width, height, data)
-        .context("Invalid image dimensions for raw data")?;
-    // Copy into owned buffer so we can pass to generate_tiles.
     let owned: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, data.to_vec())
-        .context("Invalid image dimensions for raw data (owned)")?;
-    let _ = img; // drop borrow
-    generate_tiles(&owned, output_dir)
+        .context("Invalid image dimensions for raw data")?;
+    generate_tiles(&owned, output_dir, canceled)
 }
-
-// ── helpers ──────────────────────────────────────────────────────────────────
 
 fn nn_downscale(
     img: &ImageBuffer<Rgba<u8>, Vec<u8>>,
@@ -143,5 +147,12 @@ fn encode_webp_lossless(img: &RgbaImage, path: &std::path::Path) -> Result<()> {
     WebPEncoder::new_lossless(BufWriter::new(file))
         .encode(img.as_raw(), w, h, ExtendedColorType::Rgba8)
         .with_context(|| format!("Failed to encode {}", path.display()))?;
+    Ok(())
+}
+
+pub(crate) fn check_canceled(canceled: &AtomicBool) -> Result<()> {
+    if canceled.load(Ordering::Relaxed) {
+        anyhow::bail!("canceled")
+    }
     Ok(())
 }

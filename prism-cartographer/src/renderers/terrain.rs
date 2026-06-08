@@ -9,8 +9,9 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 
-use crate::tile_generator;
+use crate::tile_generator::{self, check_canceled};
 
 pub const BIOME_GRID: u32 = 32;
 pub const BIOME_TILES_PER_CHUNK: u32 = BIOME_GRID * BIOME_GRID;
@@ -69,10 +70,14 @@ pub struct TerrainChunkState {
 ///   `{input_dir}/{region_prefix}{N}/terrain_chunk_state.json`
 ///   `{input_dir}/{region_prefix}{N}/world_region_state.json` (optional)
 ///
-/// Output: `{output_dir}/maps/terrain/tiles/{z}/{x}/{y}.webp`
-pub fn render(input_dir: &Path, region_prefix: &str, output_dir: &Path) -> Result<()> {
-    let tiles_dir = output_dir.join("maps").join("terrain").join("tiles");
-    std::fs::create_dir_all(&tiles_dir)
+/// Tiles are written directly into `tiles_dir` (`{z}/{x}/{y}.webp`).
+pub fn render(
+    input_dir: &Path,
+    region_prefix: &str,
+    tiles_dir: &Path,
+    canceled: &AtomicBool,
+) -> Result<()> {
+    std::fs::create_dir_all(tiles_dir)
         .with_context(|| format!("Failed to create {}", tiles_dir.display()))?;
 
     log::info!(
@@ -147,6 +152,8 @@ pub fn render(input_dir: &Path, region_prefix: &str, output_dir: &Path) -> Resul
     let mut unknown_biomes: HashMap<u8, u64> = HashMap::new();
 
     for (region_id, chunks) in &regions {
+        check_canceled(canceled)?;
+
         let surface_chunks: Vec<&TerrainChunkState> =
             chunks.iter().filter(|c| c.dimension == 1).collect();
 
@@ -252,7 +259,7 @@ pub fn render(input_dir: &Path, region_prefix: &str, output_dir: &Path) -> Resul
     log::info!("[terrain] total surface chunks rendered: {}", total_chunks);
 
     log::debug!("[terrain] applying elevation relief...");
-    apply_relief(&mut img, &elevations, &water_types);
+    apply_relief(&mut img, &elevations, &water_types, canceled)?;
     log::debug!("[terrain] elevation relief done");
 
     drop(elevations);
@@ -262,14 +269,20 @@ pub fn render(input_dir: &Path, region_prefix: &str, output_dir: &Path) -> Resul
         "[terrain] generating tile pyramid → {}",
         tiles_dir.display()
     );
-    tile_generator::generate_tiles(&img, &tiles_dir)?;
+    tile_generator::generate_tiles(&img, tiles_dir, canceled)?;
 
     log::info!("[terrain] done");
     Ok(())
 }
 
-fn apply_relief(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, elevations: &[i16], water_types: &[u8]) {
+fn apply_relief(
+    img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    elevations: &[i16],
+    water_types: &[u8],
+    canceled: &AtomicBool,
+) -> Result<()> {
     for by in 0..WORLD_TILES {
+        check_canceled(canceled)?;
         for bx in 0..WORLD_TILES {
             let ti = (by * WORLD_TILES + bx) as usize;
             let elev = elevations[ti];
@@ -313,6 +326,7 @@ fn apply_relief(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, elevations: &[i16], wa
             }
         }
     }
+    Ok(())
 }
 
 fn hex_neighbors(tx: i32, tz: i32) -> [(i32, i32); 6] {

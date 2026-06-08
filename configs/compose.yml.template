@@ -15,6 +15,7 @@ services:
       - ./config/prism/cartographer.toml:/etc/cartographer/config.toml:ro
       - ./data/prism:/data/input
       - ./data/www:/data/output
+    command: "/etc/cartographer/config.toml"
 $SERVICE$
   prism-$GROUP$:
     container_name: $NAME$

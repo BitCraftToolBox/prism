@@ -9,9 +9,10 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path as FsPath;
+use std::sync::atomic::AtomicBool;
 use tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, Transform};
 
-use crate::tile_generator;
+use crate::tile_generator::{self, check_canceled};
 
 /// Pixel canvas size = WORLD_TILES × RENDER_SCALE = 12800 × 3 = 38400. Must match other renderers.
 const MAP_SIZE: u32 = 38400;
@@ -65,10 +66,14 @@ struct PavingTileDesc {
 ///   `{input_dir}/{region_prefix}{N}/paved_tile_state.json`
 ///   `{input_dir}/{region_prefix}{N}/road_locations.json`
 ///
-/// Output: `{output_dir}/roads/tiles/{z}/{x}/{y}.webp`
-pub fn render(input_dir: &FsPath, region_prefix: &str, output_dir: &FsPath) -> Result<()> {
-    let tiles_dir = output_dir.join("roads").join("tiles");
-    std::fs::create_dir_all(&tiles_dir)
+/// Tiles are written directly into `tiles_dir` (`{z}/{x}/{y}.webp`).
+pub fn render(
+    input_dir: &FsPath,
+    region_prefix: &str,
+    tiles_dir: &FsPath,
+    canceled: &AtomicBool,
+) -> Result<()> {
+    std::fs::create_dir_all(tiles_dir)
         .with_context(|| format!("Failed to create {}", tiles_dir.display()))?;
 
     let tile_colors = load_tile_color_map(input_dir)?;
@@ -89,6 +94,7 @@ pub fn render(input_dir: &FsPath, region_prefix: &str, output_dir: &FsPath) -> R
         if !tiles_path.exists() && !locs_path.exists() {
             continue;
         }
+        check_canceled(canceled)?;
 
         if let Ok(f) = File::open(&locs_path) {
             let locs: Vec<RoadLocationRow> = serde_json::from_reader(BufReader::new(f))
@@ -151,13 +157,11 @@ pub fn render(input_dir: &FsPath, region_prefix: &str, output_dir: &FsPath) -> R
     let raw_data = render_hexagons(points, MAP_SIZE, MAP_SIZE)?;
 
     log::info!("[roads] generating tile pyramid → {}", tiles_dir.display());
-    tile_generator::generate_tiles_from_raw(&raw_data, MAP_SIZE, MAP_SIZE, &tiles_dir)?;
+    tile_generator::generate_tiles_from_raw(&raw_data, MAP_SIZE, MAP_SIZE, tiles_dir, canceled)?;
 
     log::info!("[roads] done");
     Ok(())
 }
-
-// ── colour helpers ────────────────────────────────────────────────────────────
 
 fn get_color_for_tile_name(name: &str) -> String {
     let lower = name.to_lowercase();
