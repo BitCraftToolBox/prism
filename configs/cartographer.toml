@@ -1,6 +1,6 @@
 input_dir = "/data/"
 output_dir = "/data/"
-run_on_complete = "/app/upload_tiles.sh {}"
+run_on_complete = "/app/upload_tiles.sh {} {root}"
 
 [[tasks]]
 renderer = "terrain"

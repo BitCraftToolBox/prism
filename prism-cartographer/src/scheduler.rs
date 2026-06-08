@@ -221,15 +221,29 @@ fn tiles_dir_for(renderer: RendererKind, output_dir: &Path) -> PathBuf {
 }
 
 /// If `config.run_on_complete` is set, format it with the committed path and
-/// run it via `sh -c`.  The literal `{}` in the command string is replaced
-/// with the absolute path of the committed output directory.
+/// run it via `sh -c`.  Two placeholders are expanded before the command is
+/// executed:
+///
+/// * `{}` — absolute path of the committed output directory
+///           (e.g. `/data/roads/tiles`)
+/// * `{root}` — absolute path of `config.output_dir`, the common root that
+///              all renderer outputs live under (e.g. `/data`).  Together with
+///              `{}` the script can derive the relative sub-path
+///              (`roads/tiles`) and recreate the same directory hierarchy on
+///              the remote side.
+///
+/// Example config:
+///   run_on_complete = "/app/upload_tiles.sh {} {root}"
 async fn run_on_complete(config: &Config, committed_path: &Path, renderer: RendererKind) {
     let Some(template) = config.run_on_complete.as_deref() else {
         return;
     };
 
     let path_str = committed_path.to_string_lossy();
-    let cmd = template.replace("{}", &path_str);
+    let root_str = config.output_dir.to_string_lossy();
+    let cmd = template
+        .replace("{root}", &root_str)
+        .replace("{}", &path_str);
 
     info!(
         "[scheduler] {} running post-commit command: {}",

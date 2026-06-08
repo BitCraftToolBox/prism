@@ -9,10 +9,15 @@ region_prefix = "bitcraft-live-"
 output_dir = "output"
 
 # Optional: command to run after each successful render commit.
-# The literal {} is replaced with the absolute path of the committed output
-# directory before execution.  The command is run via `sh -c`.
+# Two placeholders are expanded before the command is executed:
+#   {}      — absolute path of the committed output directory
+#             (e.g. /data/roads/tiles)
+#   {root}  — absolute path of output_dir, the common root for all renderers
+#             (e.g. /data).  Passing both lets the upload script reconstruct
+#             the full relative path (roads/tiles) on the remote host.
+# The command is run via `sh -c`.
 # Example:
-#   run_on_complete = "/app/upload_tiles.sh {}"
+#   run_on_complete = "/app/upload_tiles.sh {} {root}"
 
 # ── scheduled tasks ───────────────────────────────────────────────────────────
 # Cron expressions use 6 fields: sec  min  hour  dom  month  dow
