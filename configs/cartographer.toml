@@ -1,14 +1,18 @@
-input_dir = "/data/input"
-output_dir = "/data/output"
+input_dir = "/data/"
+output_dir = "/data/"
+run_on_complete = "/app/upload_tiles.sh {}"
 
 [[tasks]]
 renderer = "terrain"
-schedule = "0 40 4 * * *" # daily, offset ~30 min from the terrain dump tasks
+# daily, offset ~5 min from the terrain dump tasks
+schedule = "0 0 4 * * *"
 
 [[tasks]]
 renderer = "game"
-schedule = "0 50 4 * * *" # daily, staggered after terrain
+# daily, staggered after terrain
+schedule = "0 10 4 * * *"
 
 [[tasks]]
 renderer = "roads"
-schedule = "0 30 * * * *" # hourly, shortly after all paving dump tasks
+# hourly, shortly after all paving dump tasks, but before terrain rendering
+schedule = "0 50 * * * *"

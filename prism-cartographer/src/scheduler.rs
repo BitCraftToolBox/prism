@@ -154,7 +154,10 @@ async fn run_task(
             Ok(Ok(())) if !is_shutdown => {
                 // Clean finish, no shutdown — commit atomically.
                 match commit(&temp_tiles_dir, &real_tiles_dir) {
-                    Ok(()) => info!("[scheduler] {} done, output committed", renderer),
+                    Ok(()) => {
+                        info!("[scheduler] {} done, output committed", renderer);
+                        run_on_complete(&config, &real_tiles_dir, renderer).await;
+                    }
                     Err(e) => {
                         error!("[scheduler] {} commit failed: {:#}", renderer, e);
                         let _ = std::fs::remove_dir_all(&temp_tiles_dir);
@@ -214,6 +217,45 @@ fn tiles_dir_for(renderer: RendererKind, output_dir: &Path) -> PathBuf {
         RendererKind::Terrain => output_dir.join("maps").join("terrain").join("tiles"),
         RendererKind::Game => output_dir.join("maps").join("game").join("tiles"),
         RendererKind::Roads => output_dir.join("roads").join("tiles"),
+    }
+}
+
+/// If `config.run_on_complete` is set, format it with the committed path and
+/// run it via `sh -c`.  The literal `{}` in the command string is replaced
+/// with the absolute path of the committed output directory.
+async fn run_on_complete(config: &Config, committed_path: &Path, renderer: RendererKind) {
+    let Some(template) = config.run_on_complete.as_deref() else {
+        return;
+    };
+
+    let path_str = committed_path.to_string_lossy();
+    let cmd = template.replace("{}", &path_str);
+
+    info!(
+        "[scheduler] {} running post-commit command: {}",
+        renderer, cmd
+    );
+
+    match tokio::process::Command::new("sh")
+        .args(["-c", &cmd])
+        .status()
+        .await
+    {
+        Ok(status) if status.success() => {
+            info!("[scheduler] {} post-commit command succeeded", renderer);
+        }
+        Ok(status) => {
+            error!(
+                "[scheduler] {} post-commit command exited with status {}",
+                renderer, status
+            );
+        }
+        Err(e) => {
+            error!(
+                "[scheduler] {} post-commit command failed to start: {}",
+                renderer, e
+            );
+        }
     }
 }
 

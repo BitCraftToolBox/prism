@@ -6,17 +6,9 @@ x-common: &common
     spacetimedb:
       condition: service_started
   env_file: "config/prism/env"
+  restart: unless-stopped
 
-services:
-  prism-cartographer:
-    container_name: cartographer
-    image: ghcr.io/bitcrafttoolbox/prism-cartographer:latest
-    volumes:
-      - ./config/prism/cartographer.toml:/etc/cartographer/config.toml:ro
-      - ./data/prism:/data/input
-      - ./data/www:/data/output
-    command: "/etc/cartographer/config.toml"
-$SERVICE$
+services:$SERVICE$
   prism-$GROUP$:
     container_name: $NAME$
     volumes:

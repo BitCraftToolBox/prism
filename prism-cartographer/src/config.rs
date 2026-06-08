@@ -18,6 +18,13 @@ pub struct Config {
     /// Scheduled rendering tasks.
     #[serde(default)]
     pub tasks: Vec<TaskConfig>,
+
+    /// Optional shell command to run after a successful render commit.
+    ///
+    /// The literal `{}` anywhere in the string is replaced with the absolute
+    /// path of the committed output directory before the command is executed
+    /// via `sh -c`.  If no `{}` is present the command is run as-is.
+    pub run_on_complete: Option<String>,
 }
 
 fn default_region_prefix() -> String {

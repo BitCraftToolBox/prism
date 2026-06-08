@@ -1,24 +1,6 @@
 [upstream]
 host = "https://bitcraft-early-access.spacetimedb.com"
 
-### Any changes to these defaults should be reflected in the global schedule in global_dumps.toml.template ###
-
-[[upstream.default_dump_schedule]]
-# map renderer - daily
-schedule = "30 $OFFSET$ 4 * * *"
-tables = [
-    { name = "terrain_chunk_state" },
-    { name = "world_region_state" }
-]
-
-[[upstream.default_dump_schedule]]
-# road renderer - hourly
-schedule = "30 $OFFSET2$ * * * *"
-tables = [
-    { name = "paved_tile_state" },
-    { name = "location_state", output_file = "road_locations", query = "SELECT loc.* FROM paved_tile_state pts JOIN location_state loc ON pts.entity_id = loc.entity_id;" },
-]
-
 [[upstream.default_dump_schedule]]
 # feature renderers - every 15 min
 schedule = "0 */15 * * * *"

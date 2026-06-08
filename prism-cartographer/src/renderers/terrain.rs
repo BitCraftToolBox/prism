@@ -68,7 +68,6 @@ pub struct TerrainChunkState {
 /// Reads:
 ///   `{input_dir}/global/biome_desc.json`  (mandatory)
 ///   `{input_dir}/{region_prefix}{N}/terrain_chunk_state.json`
-///   `{input_dir}/{region_prefix}{N}/world_region_state.json` (optional)
 ///
 /// Tiles are written directly into `tiles_dir` (`{z}/{x}/{y}.webp`).
 pub fn render(

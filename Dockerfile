@@ -15,6 +15,9 @@ RUN apk add --no-cache \
     linux-headers \
     git
 
+COPY prism-cartographer/Cargo.toml prism-cartographer/Cargo.toml
+RUN mkdir -p prism-cartographer/src && \
+    echo 'fn main() {}' > prism-cartographer/src/main.rs
 COPY Cargo.toml Cargo.lock ./
 COPY relay-bindings/Cargo.toml relay-bindings/Cargo.toml
 COPY prism/Cargo.toml prism/Cargo.toml

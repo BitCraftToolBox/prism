@@ -8,6 +8,12 @@ region_prefix = "bitcraft-live-"
 # Root directory for all rendered output.
 output_dir = "output"
 
+# Optional: command to run after each successful render commit.
+# The literal {} is replaced with the absolute path of the committed output
+# directory before execution.  The command is run via `sh -c`.
+# Example:
+#   run_on_complete = "/app/upload_tiles.sh {}"
+
 # ── scheduled tasks ───────────────────────────────────────────────────────────
 # Cron expressions use 6 fields: sec  min  hour  dom  month  dow
 # Examples:

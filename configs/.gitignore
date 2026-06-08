@@ -1,5 +1,6 @@
 *.toml
 *.yml
 *.sh
+Dockerfile*
 # generic
 !cartographer.toml

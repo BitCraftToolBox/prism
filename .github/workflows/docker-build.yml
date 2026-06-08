@@ -1,6 +1,12 @@
 name: Build Prism docker image
 on:
   workflow_dispatch:
+    inputs:
+      do_binding_update:
+        description: 'Turn off to skip upstream cacheless binding update'
+        type: boolean
+        required: false
+        default: true
 
 jobs:
   build-prism:
@@ -16,6 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Update upstream bindings
+        if: ${{ inputs.do_binding_update }}
         run: |
           cargo update bindings
 
