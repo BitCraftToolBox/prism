@@ -3,10 +3,15 @@ on:
   workflow_dispatch:
     inputs:
       do_binding_update:
-        description: 'Turn off to skip upstream cacheless binding update'
+        description: 'Update upstream cacheless bindings'
         type: boolean
         required: false
-        default: true
+        default: false
+  push:
+    branches:
+      - main
+    paths:
+      - 'prism/**'
 
 jobs:
   build-prism:
@@ -22,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Update upstream bindings
-        if: ${{ inputs.do_binding_update }}
+        if: ${{ github.event_name != 'push' && inputs.do_binding_update }}
         run: |
           cargo update bindings
 

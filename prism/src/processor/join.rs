@@ -91,9 +91,11 @@ impl RegionJoinState {
             .keys()
             .filter_map(|&eid| {
                 let loc = self.last_location.get(&eid)?;
-                if loc.dimension != OVERWORLD_DIM {
-                    return None;
-                }
+                // allow initial snapshot to record players in other dimensions
+                // since it's better than just not having a location for them at all
+                // if loc.dimension != OVERWORLD_DIM {
+                //     return None;
+                // }
                 Some(PlayerRow {
                     entity_id: eid,
                     region_id,
