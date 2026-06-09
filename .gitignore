@@ -1,6 +1,6 @@
-/target
-/relay-module/target
-/config.toml
-.env
+**/target
+**/node_modules
+**/config.toml
+**/.env
 
 dumps/

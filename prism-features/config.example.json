@@ -1,0 +1,5 @@
+{
+  "input_dir": "../dumps",
+  "output_dir": "../static/assets",
+  "upstream_token": "optional-if-using-PRISM_UPSTREAM_TOKEN"
+}

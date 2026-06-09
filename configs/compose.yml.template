@@ -8,7 +8,18 @@ x-common: &common
   env_file: "config/prism/env"
   restart: unless-stopped
 
-services:$SERVICE$
+services:
+  prism-features:
+    container_name: prism-features
+    image: ghcr.io/bitcrafttoolbox/prism-features:latest
+    volumes:
+      - ./config/prism/features.json:/app/config.json:ro
+      - ./data/prism:/data/input
+      - ./data/www:/data/output
+    env_file: "config/prism/env"
+    restart: unless-stopped
+    command: ["1,16,31,46 * * * *"]
+$SERVICE$
   prism-$GROUP$:
     container_name: $NAME$
     volumes:

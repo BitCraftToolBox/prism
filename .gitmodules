@@ -1,0 +1,4 @@
+[submodule "prism-features/bindings_global"]
+	path = prism-features/bindings_global
+	url = https://github.com/BitCraftToolBox/BitCraft_Bindings.git
+	branch = ts-global

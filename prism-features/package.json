@@ -1,0 +1,14 @@
+{
+  "type": "module",
+  "scripts": {
+    "generate": "tsx generate_feature_jsons.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "tsx": "^4.20.5"
+  },
+  "dependencies": {
+    "@clockworklabs/spacetimedb-sdk": "^1.3.3",
+    "node-cron": "^4.2.1"
+  }
+}
