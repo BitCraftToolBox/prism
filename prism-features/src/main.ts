@@ -37,7 +37,7 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     write_json(config.output_dir, "ruined", outputs.ruined);
     write_json(config.output_dir, "temples", outputs.temples);
     write_json(config.output_dir, "dungeons", outputs.dungeons);
-    write_json(config.output_dir, "towers", outputs.towers);
+    write_json(config.output_dir, "towers", {type: "FeatureCollection", features: outputs.towers});
     write_json(config.output_dir, "grids", {type: "FeatureCollection", features: outputs.grids});
     write_json(config.output_dir, "claims", {type: "FeatureCollection", features: outputs.claims});
 }

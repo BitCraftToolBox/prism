@@ -240,12 +240,14 @@ export function make_tower_feature(
     claim_state: ClaimStateData,
     local_state: ClaimLocalStateData,
     territories: WatchtowerTerritory[],
-): unknown {
+): {type: "FeatureCollection", features: any[]} | null {
     const location = get_some_location(local_state.location);
     if (!location) return null;
 
     const territory = territories.find((t) => t.entity_id === claim_state.owner_building_entity_id);
+    const towerEntityId = String(claim_state.owner_building_entity_id);
     const props = {
+        towerEntityId,
         name: format_template_args(claim_state.name),
         owner: territory?.owner_name ?? null,
         ownerId: territory ? String(territory.owner_id) : null,
@@ -277,12 +279,21 @@ export function make_tower_feature(
         features: [
             {
                 type: "Feature",
-                properties: {fillOpacity: 0.0, fillColor: territory.color, color: "#7f7f7f", weight: 0.5},
+                properties: {
+                    ...props,
+                    featureKind: "tower-chunks",
+                    fillOpacity: 0.0,
+                    fillColor: territory.color,
+                    color: "#7f7f7f",
+                    weight: 0.5,
+                    pointCoords: [location.z, location.x],
+                },
                 geometry: {type: "MultiPolygon", coordinates: polygons.map((ring) => [ring])},
             },
             {
                 type: "Feature",
                 properties: {
+                    featureKind: "tower-outline",
                     fillOpacity: 0.6,
                     color: territory.outline_color,
                     weight: 1,
@@ -291,7 +302,11 @@ export function make_tower_feature(
                 },
                 geometry: {type: "MultiPolygon", coordinates: outlines},
             },
-            {type: "Feature", properties: props, geometry: {type: "Point", coordinates: [location.x, location.z]}},
+            {
+                type: "Feature",
+                properties: {...props, featureKind: "tower-marker"},
+                geometry: {type: "Point", coordinates: [location.x, location.z]}
+            },
         ],
     };
 }

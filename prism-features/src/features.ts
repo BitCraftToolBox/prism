@@ -136,7 +136,7 @@ export function add_feature(
             break;
         case 90000: {
             const tower = make_tower_feature(claim_state, local_state, territories);
-            if (tower) outputs.towers.push(tower);
+            if (tower) outputs.towers.push(...tower.features);
             break;
         }
         case 405: {
