@@ -48,7 +48,7 @@ with open(os.path.join(out_dir, "docker-compose.prism.yml"), "w") as f:
     f.write(compose_output)
 
 
-m_h = """
+m_h = """\
 [upstream]
 host = "https://bitcraft-early-access.spacetimedb.com"
 """
@@ -62,7 +62,9 @@ m_d_1 = """
 [[upstream.regions.dumps]]
 schedule = "{m_offset_1} 55 3 * * *"
 tables = [
-    {{ name = "terrain_chunk_state" }},{m_global_1}
+    {{ name = "terrain_chunk_state" }},
+    {{ name = "location_state", output_file = "resource_locations", query = "SELECT loc.* FROM resource_state res JOIN location_state loc ON res.entity_id = loc.entity_id;" }},
+    {{ name = "resource_state" }},{m_global_1}
 ]
 """
 m_global_1 = '\n    { name = "biome_desc", output_folder = "global" },'

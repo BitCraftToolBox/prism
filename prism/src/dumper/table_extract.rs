@@ -40,6 +40,7 @@ pub enum SupportedTable {
     MarketplaceState,
     WorldRegionNameState,
     GrowthState,
+    ResourceState,
 }
 
 impl SupportedTable {
@@ -60,6 +61,7 @@ impl SupportedTable {
             SupportedTable::MarketplaceState => "marketplace_state",
             SupportedTable::WorldRegionNameState => "world_region_name_state",
             SupportedTable::GrowthState => "growth_state",
+            SupportedTable::ResourceState => "resource_state",
         }
     }
 
@@ -79,6 +81,7 @@ impl SupportedTable {
         SupportedTable::MarketplaceState,
         SupportedTable::WorldRegionNameState,
         SupportedTable::GrowthState,
+        SupportedTable::ResourceState,
     ];
 
     /// Parse a table name string into a [`SupportedTable`], returning `None`
@@ -108,6 +111,7 @@ pub fn has_inserts(update: &DbUpdate, table: SupportedTable) -> bool {
         SupportedTable::MarketplaceState => !update.marketplace_state.inserts.is_empty(),
         SupportedTable::WorldRegionNameState => !update.world_region_name_state.inserts.is_empty(),
         SupportedTable::GrowthState => !update.growth_state.inserts.is_empty(),
+        SupportedTable::ResourceState => !update.resource_state.inserts.is_empty(),
     }
 }
 
@@ -129,6 +133,7 @@ pub fn extract_rows_json(update: &DbUpdate, table: SupportedTable) -> Vec<Value>
         SupportedTable::MarketplaceState => serialize(&update.marketplace_state),
         SupportedTable::WorldRegionNameState => serialize(&update.world_region_name_state),
         SupportedTable::GrowthState => serialize(&update.growth_state),
+        SupportedTable::ResourceState => serialize(&update.resource_state),
     }
 }
 
