@@ -27,14 +27,17 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     for (const claim_state of region_data.claim_state) {
         const local_state = local_state_map.get(claim_state.entity_id);
         if (!local_state) continue;
-        add_feature(outputs, claim_state, local_state, territories, region_data.hexite_timers, claim_extras);
+        add_feature(outputs, claim_state, local_state, territories, region_data.growth_timers, claim_extras);
     }
 
     outputs.grids = build_grid_features(region_data.world_region_name_state);
 
     write_json(config.output_dir, "caves", outputs.caves);
     write_json(config.output_dir, "trees", outputs.trees);
-    write_json(config.output_dir, "ruined", outputs.ruined);
+    write_json(config.output_dir, "empireResources", outputs.empireResources);
+    write_json(config.output_dir, "uncharted", outputs.uncharted);
+    write_json(config.output_dir, "events", outputs.events);
+    write_json(config.output_dir, "npcs", outputs.npcs);
     write_json(config.output_dir, "temples", outputs.temples);
     write_json(config.output_dir, "dungeons", outputs.dungeons);
     write_json(config.output_dir, "towers", {type: "FeatureCollection", features: outputs.towers});

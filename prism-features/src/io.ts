@@ -6,8 +6,8 @@ import {
   ClaimStateData,
   ClaimTechStateData,
   GrowthStateData,
-  HexitDepositTimer,
-  HexitLocationData,
+  GrowthStateTimers,
+  GrowthStateLocations,
   MarketplaceStateData,
   RegionData,
   WaystoneStateData,
@@ -39,22 +39,21 @@ function infer_region_id(region_dir: string): number {
     return Number(match[1]);
 }
 
-function build_hexite_timers(region_dir: string): HexitDepositTimer[] {
+function build_hexite_timers(region_dir: string): GrowthStateTimers[] {
     const growth_state = read_json_file<GrowthStateData[]>(path.join(region_dir, "growth_state.json"), []);
-    const hexite_locations = read_json_file<HexitLocationData[]>(path.join(region_dir, "hexite_locations.json"), []);
+    const growth_locations = read_json_file<GrowthStateLocations[]>(path.join(region_dir, "timer_locations.json"), []);
 
-    if (growth_state.length === 0 || hexite_locations.length === 0) {
+    if (growth_state.length === 0 || growth_locations.length === 0) {
         return [];
     }
 
-    const location_by_entity = new Map<bigint, HexitLocationData>();
-    for (const location of hexite_locations) {
+    const location_by_entity = new Map<bigint, GrowthStateLocations>();
+    for (const location of growth_locations) {
         location_by_entity.set(location.entity_id, location);
     }
 
-    const timers: HexitDepositTimer[] = [];
+    const timers: GrowthStateTimers[] = [];
     for (const growth of growth_state) {
-        if (growth.growth_recipe_id !== 1577969715) continue;
         const location = location_by_entity.get(growth.entity_id);
         if (!location) continue;
 
@@ -88,7 +87,7 @@ export function load_region_data(input_dir: string): RegionData {
         claim_state: [],
         claim_local_state: [],
         world_region_name_state: [],
-        hexite_timers: [],
+        growth_timers: [],
         bank_state: [],
         marketplace_state: [],
         waystone_state: [],
@@ -122,7 +121,7 @@ export function load_region_data(input_dir: string): RegionData {
         combined.bank_state.push(...bank_state);
         combined.marketplace_state.push(...marketplace_state);
         combined.waystone_state.push(...waystone_state);
-        combined.hexite_timers.push(...build_hexite_timers(region_dir));
+        combined.growth_timers.push(...build_hexite_timers(region_dir));
     }
 
     return combined;

@@ -1,4 +1,4 @@
-import {ClaimLocalStateData, ClaimStateData, ClaimTechStateData, get_some_location, HexitDepositTimer, RegionData,} from "./types";
+import {ClaimLocalStateData, ClaimStateData, ClaimTechStateData, get_some_location, GrowthStateTimers, RegionData,} from "./types";
 import {compute_claim_tier, format_template_args} from "./utils";
 import {make_tower_feature, WatchtowerTerritory} from "./watchtower";
 
@@ -8,7 +8,10 @@ export interface OutputData {
     towers: unknown[];
     caves: unknown[];
     trees: unknown[];
-    ruined: unknown[];
+    empireResources: any[];
+    uncharted: any[];
+    events: any[];
+    npcs: any[];
     temples: unknown[];
     dungeons: unknown[];
     grids: unknown[];
@@ -44,7 +47,10 @@ export function create_outputs(): OutputData {
         towers: [],
         caves: [],
         trees: [],
-        ruined: [],
+        empireResources: [],
+        uncharted: [],
+        events: [],
+        npcs: [],
         temples: [],
         dungeons: [],
         grids: [],
@@ -57,7 +63,7 @@ export function add_feature(
     claim_state: ClaimStateData,
     local_state: ClaimLocalStateData,
     territories: WatchtowerTerritory[],
-    hexite_timers: HexitDepositTimer[],
+    growth_timers: GrowthStateTimers[],
     claim_extras: ClaimExtras,
 ): void {
     const location = get_some_location(local_state.location);
@@ -67,24 +73,36 @@ export function add_feature(
 
     switch (local_state.building_description_id) {
         case 433549604:
-        case 421789207: {
-            let timer: Date | undefined;
-            if (local_state.building_description_id === 421789207) {
-                timer = hexite_timers.find((row) => row.location.x === location.x && row.location.z === location.z)?.end_timestamp;
-            }
-            outputs.trees.push(
-                make_feature(
-                    {
-                        name: claim_name,
-                        type: local_state.building_description_id === 421789207 ? "hexite" : "tree",
-                        timer,
-                    },
-                    location.x,
-                    location.z,
-                ),
-            );
+            outputs.trees.push(make_feature({name: claim_name, type: "tree"}, location.x, location.z));
+            break;
+        case 421789207:
+        case 1375306631: {
+            const timer = growth_timers.find((row) => row.location.x === location.x && row.location.z === location.z)?.end_timestamp;
+            const type = local_state.building_description_id === 421789207 ? 'hexite' : 'makers-tree';
+            outputs.empireResources.push(make_feature({name: claim_name, type, timer}, location.x, location.z));
             break;
         }
+        case 578530093:
+            outputs.events.push(make_feature({
+                name: 'Hexite Vault',
+                type: 'vault-event',
+                timer: growth_timers.find((row) => row.location.x === location.x && row.location.z === location.z)?.end_timestamp,
+                iconName: 'vault-event'
+            }, location.x, location.z));
+            break;
+        case 719999256:
+            outputs.uncharted.push(make_feature({
+                name: claim_name,
+                iconName: 'volcanic-geyser'
+            }, location.x, location.z));
+            break;
+        case 1503293649:
+            outputs.uncharted.push(make_feature({
+                name: claim_name,
+                iconName: 'hermit-crab',
+                iconSize: [25, 25]
+            }, location.x, location.z));
+            break;
         case 489406613:
         case 1752479333:
         case 1662809355:
@@ -92,8 +110,15 @@ export function add_feature(
         case 1008368350:
             outputs.temples.push(make_feature({name: claim_name}, location.x, location.z));
             break;
+        case 1285450540:
+            outputs.npcs.push(make_feature({
+                name: claim_name,
+                type: 'traveler-camp',
+                iconName: 'traveler-camp'
+            }, location.x, location.z));
+            break;
         case 292245080:
-            outputs.ruined.push(make_feature({name: claim_name}, location.x, location.z));
+            outputs.npcs.push(make_feature({name: claim_name, type: 'ruined-city'}, location.x, location.z));
             break;
         case 790011334:
         case 280863630:

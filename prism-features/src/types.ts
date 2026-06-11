@@ -53,13 +53,13 @@ export interface GrowthStateData {
     };
 }
 
-export interface HexitLocationData {
+export interface GrowthStateLocations {
     entity_id: bigint;
     x: number;
     z: number;
 }
 
-export interface HexitDepositTimer {
+export interface GrowthStateTimers {
     entity_id: bigint;
     location: { x: number; z: number };
     end_timestamp: Date;
@@ -69,7 +69,7 @@ export interface RegionData {
     claim_state: ClaimStateData[];
     claim_local_state: ClaimLocalStateData[];
     world_region_name_state: WorldRegionNameStateData[];
-    hexite_timers: HexitDepositTimer[];
+    growth_timers: GrowthStateTimers[];
     bank_state: BankStateData[];
     marketplace_state: MarketplaceStateData[];
     waystone_state: WaystoneStateData[];
