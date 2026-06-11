@@ -31,7 +31,10 @@ RUN mkdir -p relay-bindings/src prism/src prism-cartographer/src && \
 # Replace placeholders with real sources and rebuild only the workspace crates.
 COPY relay-bindings/src/ relay-bindings/src/
 COPY prism/src/ prism/src/
-RUN cargo build --release --target x86_64-unknown-linux-musl -p prism && \
+RUN ! grep -qx 'fn main() {}' prism/src/main.rs && \
+    cargo clean -p prism -p relay_bindings && \
+    touch relay-bindings/src/lib.rs && touch prism/src/main.rs && \
+    cargo build --release --target x86_64-unknown-linux-musl -p prism && \
     strip target/x86_64-unknown-linux-musl/release/prism
 
 # --- Runtime stage ---

@@ -12,6 +12,7 @@ on:
       - main
     paths:
       - 'prism/**'
+      - 'Dockerfile'
 
 jobs:
   build-prism:
