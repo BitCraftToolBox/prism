@@ -15,12 +15,20 @@ RUN apk add --no-cache \
     linux-headers \
     git
 
-COPY prism-cartographer/Cargo.toml prism-cartographer/Cargo.toml
-RUN mkdir -p prism-cartographer/src && \
-    echo 'fn main() {}' > prism-cartographer/src/main.rs
 COPY Cargo.toml Cargo.lock ./
 COPY relay-bindings/Cargo.toml relay-bindings/Cargo.toml
 COPY prism/Cargo.toml prism/Cargo.toml
+
+# Build dependency graph with placeholder sources so this layer is reused when
+# only application source files change.
+RUN mkdir -p relay-bindings/src prism/src prism-cartographer/src && \
+    printf '[package]\nname = "prism-cartographer"\nversion = "0.0.0"\nedition = "2024"\n' > prism-cartographer/Cargo.toml && \
+    echo '// placeholder for dependency caching' > relay-bindings/src/lib.rs && \
+    echo 'fn main() {}' > prism/src/main.rs && \
+    echo 'fn main() {}' > prism-cartographer/src/main.rs && \
+    cargo build --release --target x86_64-unknown-linux-musl -p prism
+
+# Replace placeholders with real sources and rebuild only the workspace crates.
 COPY relay-bindings/src/ relay-bindings/src/
 COPY prism/src/ prism/src/
 RUN cargo build --release --target x86_64-unknown-linux-musl -p prism && \
