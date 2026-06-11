@@ -8,7 +8,7 @@
 //! covering everything accumulated so far.
 
 use anyhow::Result;
-use log::{info, warn};
+use log::{debug, info, warn};
 
 use super::ProcessorHandle;
 use super::join::{EntityLocation, JoinState};
@@ -424,6 +424,6 @@ fn send_relay(tx: &tokio::sync::mpsc::Sender<RelayMsg>, msgs: impl Iterator<Item
         }
     }
     if dropped > 0 {
-        warn!("relay channel full — dropped {} messages", dropped);
+        debug!("relay channel full — dropped {} messages", dropped);
     }
 }

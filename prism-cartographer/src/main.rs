@@ -26,7 +26,10 @@ fn main() -> Result<()> {
     log::info!("[cartographer] input_dir: {}", config.input_dir.display());
     log::info!("[cartographer] output_dir: {}", config.output_dir.display());
     log::info!("[cartographer] region_prefix: {}", config.region_prefix);
-    log::info!("[cartographer] run_on_complete: {}", config.run_on_complete.as_deref().unwrap_or("None"));
+    log::info!(
+        "[cartographer] run_on_complete: {}",
+        config.run_on_complete.as_deref().unwrap_or("None")
+    );
     log::info!("[cartographer] tasks: {}", config.tasks.len());
     for task in &config.tasks {
         log::info!("  {} @ {}", task.renderer, task.schedule);

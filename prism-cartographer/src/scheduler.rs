@@ -17,6 +17,10 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use cron::Schedule;
 use log::{error, info, warn};
+use tokio::sync::broadcast;
+
+#[cfg(unix)]
+use tokio::signal::unix::{SignalKind, signal};
 
 use crate::config::{Config, RendererKind};
 use crate::shutdown::SharedShutdown;
@@ -28,14 +32,21 @@ pub async fn run(config: Arc<Config>, shutdown: SharedShutdown) -> Result<()> {
         return Ok(());
     }
 
+    let (game_trigger_tx, terrain_trigger_tx) = setup_manual_trigger_signals();
+
     let mut handles = Vec::new();
     for task in &config.tasks {
         let schedule_str = task.schedule.clone();
         let renderer = task.renderer;
         let cfg = config.clone();
         let sd = shutdown.clone();
+        let manual_trigger_rx = match renderer {
+            RendererKind::Game => game_trigger_tx.as_ref().map(|tx| tx.subscribe()),
+            RendererKind::Terrain => terrain_trigger_tx.as_ref().map(|tx| tx.subscribe()),
+            RendererKind::Roads => None,
+        };
 
-        let handle = tokio::spawn(run_task(schedule_str, renderer, cfg, sd));
+        let handle = tokio::spawn(run_task(schedule_str, renderer, cfg, sd, manual_trigger_rx));
         handles.push(handle);
     }
 
@@ -53,6 +64,7 @@ async fn run_task(
     renderer: RendererKind,
     config: Arc<Config>,
     shutdown: SharedShutdown,
+    mut manual_trigger_rx: Option<broadcast::Receiver<()>>,
 ) {
     let schedule = match Schedule::from_str(&schedule_str) {
         Ok(s) => s,
@@ -88,14 +100,29 @@ async fn run_task(
         );
 
         // Wait for the trigger time; bail immediately on shutdown.
-        let should_run = tokio::select! {
-            biased;
-            _ = shutdown_rx => false,
-            _ = tokio::time::sleep(delay) => true,
+        let run_reason = match manual_trigger_rx.as_mut() {
+            Some(rx) => tokio::select! {
+                biased;
+                _ = shutdown_rx => RunReason::Shutdown,
+                _ = tokio::time::sleep(delay) => RunReason::Scheduled,
+                _ = wait_for_manual_trigger(rx) => RunReason::Manual,
+            },
+            None => tokio::select! {
+                biased;
+                _ = shutdown_rx => RunReason::Shutdown,
+                _ = tokio::time::sleep(delay) => RunReason::Scheduled,
+            }
         };
 
-        if !should_run {
-            return;
+        match run_reason {
+            RunReason::Shutdown => return,
+            RunReason::Scheduled => {}
+            RunReason::Manual => {
+                info!(
+                    "[scheduler] {} manual trigger received; running now",
+                    renderer
+                );
+            }
         }
 
         let real_tiles_dir = tiles_dir_for(renderer, &config.output_dir);
@@ -193,6 +220,90 @@ async fn run_task(
             return;
         }
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RunReason {
+    Shutdown,
+    Scheduled,
+    Manual,
+}
+
+async fn wait_for_manual_trigger(rx: &mut broadcast::Receiver<()>) {
+    loop {
+        match rx.recv().await {
+            Ok(()) => return,
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                warn!(
+                    "[scheduler] manual render trigger lagged by {} signal(s); running now",
+                    skipped
+                );
+                return;
+            }
+            // Sender lifetime is tied to scheduler::run(); if it closes, disable wakeups.
+            Err(broadcast::error::RecvError::Closed) => {
+                std::future::pending::<()>().await;
+            }
+        }
+    }
+}
+
+fn setup_manual_trigger_signals() -> (Option<broadcast::Sender<()>>, Option<broadcast::Sender<()>>)
+{
+    #[cfg(unix)]
+    {
+        let (game_tx, _) = broadcast::channel(16);
+        let (terrain_tx, _) = broadcast::channel(16);
+
+        spawn_manual_trigger_listener(
+            SignalKind::user_defined1(),
+            "SIGUSR1",
+            RendererKind::Game,
+            game_tx.clone(),
+        );
+        spawn_manual_trigger_listener(
+            SignalKind::user_defined2(),
+            "SIGUSR2",
+            RendererKind::Terrain,
+            terrain_tx.clone(),
+        );
+
+        return (Some(game_tx), Some(terrain_tx));
+    }
+
+    #[cfg(not(unix))]
+    {
+        (None, None)
+    }
+}
+
+#[cfg(unix)]
+fn spawn_manual_trigger_listener(
+    kind: SignalKind,
+    signal_name: &'static str,
+    renderer: RendererKind,
+    tx: broadcast::Sender<()>,
+) {
+    tokio::spawn(async move {
+        let mut stream = match signal(kind) {
+            Ok(stream) => stream,
+            Err(e) => {
+                error!(
+                    "[scheduler] failed to install {} listener for {}: {}",
+                    signal_name, renderer, e
+                );
+                return;
+            }
+        };
+
+        while stream.recv().await.is_some() {
+            info!(
+                "[scheduler] {} received; triggering {} render tasks",
+                signal_name, renderer
+            );
+            let _ = tx.send(());
+        }
+    });
 }
 
 /// Replace `real_tiles_dir` with `temp_tiles_dir` via remove-then-rename.

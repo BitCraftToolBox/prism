@@ -3,13 +3,14 @@
 
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU8;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Utc;
 use cron::Schedule;
 use log::{debug, error, info, warn};
+use tokio::sync::broadcast;
 use tokio::sync::mpsc::{Sender, UnboundedSender, unbounded_channel};
 use upstream_bindings::ext::ctx::RunUntil;
 use upstream_bindings::region::{DbConnection, DbUpdate};
@@ -23,7 +24,13 @@ use crate::dumper::{DumpMsg, table_extract};
 use crate::shutdown::SharedShutdown;
 
 const UPSTREAM_URI: &str = "https://bitcraft-early-access.spacetimedb.com";
-const RECONNECT_BACKOFF: Duration = Duration::from_secs(5);
+const RECONNECT_BACKOFF_STEPS: [Duration; 5] = [
+    Duration::from_secs(5),
+    Duration::from_secs(30),
+    Duration::from_secs(60),
+    Duration::from_secs(180),
+    Duration::from_secs(300),
+];
 /// Maximum time to wait for a dump subscription to deliver rows.
 const DUMP_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -37,6 +44,7 @@ pub async fn run_region(
     proc_tx: UnboundedSender<RegionUpdate>,
     dump_tx: Sender<DumpMsg>,
     shutdown: SharedShutdown,
+    dump_manual_trigger_tx: Option<broadcast::Sender<()>>,
 ) -> Result<()> {
     let token = match config.token_for(&region) {
         Some(t) => t.to_string(),
@@ -54,6 +62,7 @@ pub async fn run_region(
     // creates its own short-lived connection when the interval fires so that
     // dump subscriptions are completely independent of the main connection.
     for cfg in config.dumps_for(&region) {
+        let manual_trigger_rx = dump_manual_trigger_tx.as_ref().map(|tx| tx.subscribe());
         tokio::spawn(run_dump_schedule(
             host.clone(),
             region.name.clone(),
@@ -61,6 +70,7 @@ pub async fn run_region(
             cfg.clone(),
             dump_tx.clone(),
             shutdown.clone(),
+            manual_trigger_rx,
         ));
     }
 
@@ -69,6 +79,8 @@ pub async fn run_region(
         warn!("[{}] no pipelines enabled; skipping region", region.name);
         return Ok(());
     }
+
+    let mut reconnect_backoff_idx = 0usize;
 
     loop {
         // Per-connection phase shared between the connection task and the
@@ -95,6 +107,8 @@ pub async fn run_region(
         let phase_for_connect = phase.clone();
         let region_name_for_log = region.name.clone();
         let region_name_for_disconnect = region.name.clone();
+        let connected_this_attempt = Arc::new(AtomicBool::new(false));
+        let connected_flag = connected_this_attempt.clone();
 
         info!("[{}] connecting...", region.name);
         let built = DbConnection::builder()
@@ -104,6 +118,7 @@ pub async fn run_region(
             .with_light_mode(true)
             .with_channel(cache_tx.clone())
             .on_connect(move |ctx, _id, _tok| {
+                connected_flag.store(true, Ordering::Relaxed);
                 info!(
                     "[{}] connected; starting subscriptions",
                     region_name_for_log
@@ -160,14 +175,24 @@ pub async fn run_region(
             // we don't need it here, drop it.
         }
 
-        warn!("[{}] reconnecting in {:?}", region.name, RECONNECT_BACKOFF);
+        let connected = connected_this_attempt.load(Ordering::Relaxed);
+        if connected {
+            reconnect_backoff_idx = 0;
+        }
+        let reconnect_backoff = RECONNECT_BACKOFF_STEPS[reconnect_backoff_idx];
+        if !connected {
+            reconnect_backoff_idx =
+                (reconnect_backoff_idx + 1).min(RECONNECT_BACKOFF_STEPS.len() - 1);
+        }
+
+        warn!("[{}] reconnecting in {:?}", region.name, reconnect_backoff);
         // Wait the backoff but bail early on shutdown.
         let Some(signal) = shutdown.lock().await.register() else {
             return Ok(());
         };
         tokio::select! {
             _ = signal => return Ok(()),
-            _ = tokio::time::sleep(RECONNECT_BACKOFF) => {}
+            _ = tokio::time::sleep(reconnect_backoff) => {}
         }
     }
 }
@@ -182,6 +207,7 @@ async fn run_dump_schedule(
     cfg: DumpScheduleConfig,
     dump_tx: Sender<DumpMsg>,
     shutdown: SharedShutdown,
+    mut manual_trigger_rx: Option<broadcast::Receiver<()>>,
 ) {
     let schedule = match Schedule::from_str(&cfg.schedule) {
         Ok(s) => s,
@@ -249,10 +275,27 @@ async fn run_dump_schedule(
             module_name, table_names, delay
         );
 
-        tokio::select! {
-            biased;
-            _ = &mut shutdown_signal => return,
-            _ = tokio::time::sleep(delay) => {}
+        let triggered_by_manual_signal = match manual_trigger_rx.as_mut() {
+            Some(rx) => tokio::select! {
+                biased;
+                _ = &mut shutdown_signal => return,
+                _ = tokio::time::sleep(delay) => false,
+                _ = wait_for_manual_trigger(rx) => true,
+            },
+            None => {
+                tokio::select! {
+                    biased;
+                    _ = &mut shutdown_signal => return,
+                    _ = tokio::time::sleep(delay) => false,
+                }
+            }
+        };
+
+        if triggered_by_manual_signal {
+            debug!(
+                "[{}] dump: SIGUSR1 manual trigger received; running now for tables {:?}",
+                module_name, table_names
+            );
         }
 
         info!(
@@ -370,6 +413,25 @@ async fn run_dump_schedule(
         // Exit early if shutdown was triggered.
         if shutdown.lock().await.register().is_none() {
             return;
+        }
+    }
+}
+
+async fn wait_for_manual_trigger(rx: &mut broadcast::Receiver<()>) {
+    loop {
+        match rx.recv().await {
+            Ok(()) => return,
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                warn!(
+                    "[dump] SIGUSR1 trigger lagged by {} signal(s); running immediately",
+                    skipped
+                );
+                return;
+            }
+            // Sender lifetime is tied to upstream::run_all(); if closed, disable trigger wakeups.
+            Err(broadcast::error::RecvError::Closed) => {
+                std::future::pending::<()>().await;
+            }
         }
     }
 }

@@ -15,8 +15,14 @@ pub mod subscription;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
+use tokio::sync::broadcast;
 use tokio::sync::mpsc::Sender;
 use upstream_bindings::region::DbUpdate;
+
+#[cfg(unix)]
+use log::{error, info};
+#[cfg(unix)]
+use tokio::signal::unix::{SignalKind, signal};
 
 use crate::config::Config;
 use crate::dumper::DumpMsg;
@@ -75,6 +81,8 @@ pub async fn run_all(
     dump_tx: Sender<DumpMsg>,
     shutdown: SharedShutdown,
 ) -> anyhow::Result<()> {
+    let dump_manual_trigger_tx = setup_dump_manual_trigger_signal();
+
     let mut handles = Vec::new();
     for region in &config.upstream.regions {
         let region = region.clone();
@@ -82,8 +90,17 @@ pub async fn run_all(
         let tx = tx.clone();
         let dump_tx = dump_tx.clone();
         let shutdown = shutdown.clone();
+        let dump_manual_trigger_tx = dump_manual_trigger_tx.clone();
         handles.push(tokio::spawn(async move {
-            connection::run_region(config, region, tx, dump_tx, shutdown).await
+            connection::run_region(
+                config,
+                region,
+                tx,
+                dump_tx,
+                shutdown,
+                dump_manual_trigger_tx,
+            )
+            .await
         }));
     }
     // Wait for all region tasks; first hard error propagates after the rest finish.
@@ -103,4 +120,39 @@ pub async fn run_all(
         Some(e) => Err(e),
         None => Ok(()),
     }
+}
+
+fn setup_dump_manual_trigger_signal() -> Option<broadcast::Sender<()>> {
+    #[cfg(unix)]
+    {
+        let (tx, _) = broadcast::channel(16);
+        spawn_dump_manual_trigger_listener(tx.clone());
+        return Some(tx);
+    }
+
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
+
+#[cfg(unix)]
+fn spawn_dump_manual_trigger_listener(tx: broadcast::Sender<()>) {
+    tokio::spawn(async move {
+        let mut stream = match signal(SignalKind::user_defined1()) {
+            Ok(stream) => stream,
+            Err(e) => {
+                error!(
+                    "[upstream] failed to install SIGUSR1 listener for dump tasks: {}",
+                    e
+                );
+                return;
+            }
+        };
+
+        while stream.recv().await.is_some() {
+            info!("[upstream] SIGUSR1 received; triggering dump tasks");
+            let _ = tx.send(());
+        }
+    });
 }
