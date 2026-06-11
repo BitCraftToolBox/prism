@@ -37,7 +37,7 @@ const PLAYER_FLUSH_MS: u64 = 500;
 const ENEMY_FLUSH_MS: u64 = 1000;
 const RESOURCE_FLUSH_MS: u64 = 2500;
 
-const MAX_BATCH: usize = 1024;
+const MAX_BATCH: usize = 50_000;
 
 /// Max rows per reducer call for bulk Replace messages.
 /// Each ResourceLocation row is ~21 bytes (BSATN); 500 000 rows ≈ 10 MB,
@@ -225,6 +225,7 @@ pub async fn run(
                             |chunk| conn.bulk_replace_resources(region_id, chunk, rows.len() as u32),
                             |chunk| conn.insert_resources(chunk),
                             "resources",
+                            region_id,
                         );
                     }
                     RelayMsg::ReplaceEnemies { region_id, rows } => {
@@ -235,6 +236,7 @@ pub async fn run(
                             |chunk| conn.bulk_replace_enemies(region_id, chunk, rows.len() as u32),
                             |chunk| conn.insert_enemies(chunk),
                             "enemies",
+                            region_id,
                         );
                     }
                     RelayMsg::ReplacePlayers { region_id, rows } => {
@@ -245,6 +247,7 @@ pub async fn run(
                             |chunk| conn.bulk_replace_players(region_id, chunk, rows.len() as u32),
                             |chunk| conn.upsert_players(chunk),
                             "players",
+                            region_id,
                         );
                     }
                     RelayMsg::ReplacePlayerStates { region_id, rows } => {
@@ -255,6 +258,7 @@ pub async fn run(
                             |chunk| conn.bulk_replace_player_states(region_id, chunk, rows.len() as u32),
                             |chunk| conn.upsert_player_states(chunk),
                             "player_states",
+                            region_id,
                         );
                     }
                     RelayMsg::InsertResource(row) => {
@@ -336,7 +340,7 @@ pub async fn run(
 
 /// Send a large set of rows as: chunk[0] via `replace_fn` (deletes region
 /// first), chunks[1..] via `upsert_fn` (insert-only).
-fn bulk_replace_chunked<T, FR, FU>(rows: Vec<T>, replace_fn: FR, upsert_fn: FU, kind: &'static str)
+fn bulk_replace_chunked<T, FR, FU>(rows: Vec<T>, replace_fn: FR, upsert_fn: FU, kind: &'static str, region: u8)
 where
     T: Clone,
     FR: Fn(Vec<T>) -> Result<()>,
@@ -347,7 +351,8 @@ where
     }
     let chunks: Vec<&[T]> = rows.chunks(BULK_REPLACE_CHUNK).collect();
     info!(
-        "relay: bulk_replace_{kind} count={} chunks={}",
+        "relay: {} bulk_replace_{kind} count={} chunks={}",
+        region,
         rows.len(),
         chunks.len()
     );

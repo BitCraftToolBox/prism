@@ -18,7 +18,7 @@ pub mod connection;
 
 /// Default bounded-channel capacity from processor → relay.
 pub fn relay_capacity(_config: &Config) -> usize {
-    8192
+    16384
 }
 
 #[derive(Debug, Clone)]
