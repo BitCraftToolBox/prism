@@ -69,6 +69,12 @@ export function add_feature(
     const location = get_some_location(local_state.location);
     if (!location) return;
 
+    function findTimer(loc) {
+        // find first timer within 5 block radius. none of the things we're interested in tracking should ever be this close
+        // i.e., vaults, hexite, maker's trees
+        return growth_timers.find(t => Math.pow(t.location.x - loc.x, 2) + Math.pow(t.location.z - loc.z, 2) < 25);
+    }
+
     const claim_name = format_template_args(claim_state.name);
 
     switch (local_state.building_description_id) {
@@ -77,7 +83,7 @@ export function add_feature(
             break;
         case 421789207:
         case 1375306631: {
-            const timer = growth_timers.find((row) => row.location.x === location.x && row.location.z === location.z)?.end_timestamp;
+            const timer = findTimer(location)?.end_timestamp;
             const type = local_state.building_description_id === 421789207 ? 'hexite' : 'makers-tree';
             outputs.empireResources.push(make_feature({name: claim_name, type, timer}, location.x, location.z));
             break;
@@ -86,7 +92,7 @@ export function add_feature(
             outputs.events.push(make_feature({
                 name: 'Hexite Vault',
                 type: 'vault-event',
-                timer: growth_timers.find((row) => row.location.x === location.x && row.location.z === location.z)?.end_timestamp,
+                timer: findTimer(location)?.end_timestamp,
                 iconName: 'vault-event'
             }, location.x, location.z));
             break;
