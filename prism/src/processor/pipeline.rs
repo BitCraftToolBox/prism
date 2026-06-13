@@ -13,7 +13,7 @@ use log::{debug, info, warn};
 use super::ProcessorHandle;
 use super::join::{EntityLocation, JoinState};
 use crate::history::HistoryMsg;
-use crate::relay::{EnemyRow, PlayerRow, PlayerStateRow, RelayMsg, ResourceRow};
+use crate::relay::{EnemyRow, GrowthTimerRow, PlayerRow, PlayerStateRow, RelayMsg, ResourceRow};
 use crate::upstream::{Phase, RegionUpdate};
 
 const OVERWORLD_DIM: u32 = 1;
@@ -50,13 +50,15 @@ pub async fn handle(
     if !region.is_live {
         region.is_live = true;
         let res = region.snapshot_resources(region_id);
+        let growth = region.snapshot_growth_timers(region_id);
         let enemy = region.snapshot_enemies(region_id);
         let play = region.snapshot_players(region_id);
         let player_states = region.snapshot_player_states(region_id);
         info!(
-            "initial snapshot ready — emitting bulk replace: region_id={} resources={} enemies={} players={} player_states={}",
+            "initial snapshot ready — emitting bulk replace: region_id={} resources={} growth_timers={} enemies={} players={} player_states={}",
             region_id,
             res.len(),
+            growth.len(),
             enemy.len(),
             play.len(),
             player_states.len(),
@@ -67,6 +69,10 @@ pub async fn handle(
                 RelayMsg::ReplaceResources {
                     region_id,
                     rows: res,
+                },
+                RelayMsg::ReplaceGrowthTimers {
+                    region_id,
+                    rows: growth,
                 },
                 RelayMsg::ReplaceEnemies {
                     region_id,
@@ -132,6 +138,12 @@ fn update_join_maps(
             region
                 .resource_kind
                 .insert(e.row.entity_id, e.row.resource_id);
+        }
+        for e in &update.growth_state.inserts {
+            region.growth_timers.insert(
+                e.row.entity_id,
+                e.row.end_timestamp.to_micros_since_unix_epoch(),
+            );
         }
 
         // Enemies: enemy_state for kind, mobile_entity_state for location.
@@ -199,6 +211,7 @@ fn emit_deltas(
     let mut resource_deletes: Vec<u64> = Vec::new();
     let mut enemy_upserts: Vec<EnemyRow> = Vec::new();
     let mut enemy_deletes: Vec<u64> = Vec::new();
+    let mut growth_timer_upserts: Vec<GrowthTimerRow> = Vec::new();
     let mut player_upserts: Vec<PlayerRow> = Vec::new();
     let mut player_state_upserts: Vec<PlayerStateRow> = Vec::new();
     let mut mobile_moves: Vec<crate::relay::MobileMoveRow> = Vec::new();
@@ -230,6 +243,15 @@ fn emit_deltas(
                 z: loc.row.z,
             });
         }
+    }
+
+    // Growth timers are keyed by resource entity_id and are insert-only here.
+    // Deletes are intentionally omitted: resource deletes clear linked timers.
+    for e in &update.growth_state.inserts {
+        growth_timer_upserts.push(GrowthTimerRow {
+            entity_id: e.row.entity_id,
+            end_timestamp_micros: e.row.end_timestamp.to_micros_since_unix_epoch(),
+        });
     }
 
     // Mobile entity updates.
@@ -364,6 +386,12 @@ fn emit_deltas(
     send_relay(
         &sinks.relay_tx,
         resource_upserts.into_iter().map(RelayMsg::InsertResource),
+    );
+    send_relay(
+        &sinks.relay_tx,
+        growth_timer_upserts
+            .into_iter()
+            .map(RelayMsg::InsertGrowthTimer),
     );
     send_relay(
         &sinks.relay_tx,

@@ -9,16 +9,17 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use log::{info, warn};
 use relay_bindings::{
-    DbConnection, EnemyLocation, MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate, PlayerState,
-    ResourceLocation, bulk_replace_enemies_reducer::bulk_replace_enemies,
+    DbConnection, EnemyLocation, GrowthTimerUpdate, MobileMoveUpdate, PlayerLocation,
+    PlayerRenameUpdate, PlayerState, ResourceLocation,
+    bulk_replace_enemies_reducer::bulk_replace_enemies,
     bulk_replace_player_states_reducer::bulk_replace_player_states,
     bulk_replace_players_reducer::bulk_replace_players,
     bulk_replace_resources_reducer::bulk_replace_resources, delete_enemies_reducer::delete_enemies,
     delete_player_states_reducer::delete_player_states, delete_players_reducer::delete_players,
     delete_resources_reducer::delete_resources, init_relay_reducer::init_relay,
-    insert_enemies_reducer::insert_enemies, insert_resources_reducer::insert_resources,
-    move_mobile_entities_reducer::move_mobile_entities, rename_players_reducer::rename_players,
-    set_players_offline_reducer::set_players_offline,
+    insert_enemies_reducer::insert_enemies, insert_growth_timers_reducer::insert_growth_timers,
+    insert_resources_reducer::insert_resources, move_mobile_entities_reducer::move_mobile_entities,
+    rename_players_reducer::rename_players, set_players_offline_reducer::set_players_offline,
     set_players_online_reducer::set_players_online,
     upsert_player_states_reducer::upsert_player_states, upsert_players_reducer::upsert_players,
 };
@@ -162,6 +163,13 @@ impl RelayConnection {
         self.conn
             .reducers
             .insert_enemies(rows)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn insert_growth_timers(&self, rows: Vec<GrowthTimerUpdate>) -> Result<()> {
+        self.conn
+            .reducers
+            .insert_growth_timers(rows)
             .map_err(|e| anyhow!("{e:?}"))
     }
 

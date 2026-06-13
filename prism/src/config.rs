@@ -108,6 +108,8 @@ pub struct PipelinesConfig {
     #[serde(default = "default_true")]
     pub resources: bool,
     #[serde(default = "default_true")]
+    pub growth_timers: bool,
+    #[serde(default = "default_true")]
     pub enemies: bool,
     #[serde(default = "default_true")]
     pub players: bool,
@@ -117,7 +119,7 @@ impl PipelinesConfig {
     /// Returns `true` if at least one pipeline is enabled and will emit
     /// messages to the relay sink.
     pub fn any_enabled(&self) -> bool {
-        self.resources || self.enemies || self.players
+        self.resources || self.growth_timers || self.enemies || self.players
     }
 }
 

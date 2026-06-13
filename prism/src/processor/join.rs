@@ -6,7 +6,7 @@
 //! resource_state, mobile_entity vs. enemy_state, ...). These maps are
 //! maintained across update batches, mirroring nodeindex's `consume()`.
 
-use crate::relay::{EnemyRow, PlayerRow, PlayerStateRow, ResourceRow};
+use crate::relay::{EnemyRow, GrowthTimerRow, PlayerRow, PlayerStateRow, ResourceRow};
 use hashbrown::{HashMap, HashSet};
 
 #[derive(Default)]
@@ -24,6 +24,8 @@ pub struct RegionJoinState {
     pub player_username: HashMap<u64, String>,
     /// set of entity_ids currently signed in (sync phase only; cleared by clear_live_caches)
     pub player_signed_in: HashSet<u64>,
+    /// entity_id -> growth end timestamp micros (sync phase only; cleared by clear_live_caches)
+    pub growth_timers: HashMap<u64, i64>,
     /// set of entity_ids that are players in this region.
     /// Seeded from player_username.keys() at the sync→live transition, then
     /// maintained by player_username_state events.  Used in live mode to route
@@ -120,6 +122,21 @@ impl RegionJoinState {
             .collect()
     }
 
+    /// Collect all known growth timers for resources currently present in this region.
+    pub fn snapshot_growth_timers(&self, _region_id: u8) -> Vec<GrowthTimerRow> {
+        self.growth_timers
+            .iter()
+            .filter_map(|(&eid, &end_timestamp_micros)| {
+                self.resource_kind
+                    .contains_key(&eid)
+                    .then_some(GrowthTimerRow {
+                        entity_id: eid,
+                        end_timestamp_micros,
+                    })
+            })
+            .collect()
+    }
+
     /// Drop all sync-phase caches and initialize live-phase state.
     /// Called once after the initial bulk snapshot has been emitted so that
     /// delta mode carries only the minimal data needed for routing.
@@ -136,6 +153,7 @@ impl RegionJoinState {
         self.enemy_kind = HashMap::default();
         self.player_username = HashMap::default();
         self.player_signed_in = HashSet::default();
+        self.growth_timers = HashMap::default();
         self.last_location = HashMap::default();
     }
 }

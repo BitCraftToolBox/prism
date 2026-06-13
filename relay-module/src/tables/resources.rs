@@ -1,4 +1,4 @@
-use spacetimedb::table;
+use spacetimedb::{Timestamp, table};
 
 #[table(accessor = resource_location, public,
     index(accessor = by_resource, btree(columns = [resource_id])),
@@ -6,6 +6,7 @@ use spacetimedb::table;
     index(accessor = by_resource_and_region, btree(columns = [resource_id, region_id])))]
 pub struct ResourceLocation {
     #[primary_key]
+    #[index(hash)]
     pub entity_id: u64,
     pub resource_id: i32,
     pub region_id: u8,
@@ -13,3 +14,15 @@ pub struct ResourceLocation {
     pub z: i32,
 }
 
+#[table(accessor = growth_timers, public,
+    index(accessor = by_region, btree(columns = [region_id])))]
+pub struct GrowthTimer {
+    #[primary_key]
+    #[index(hash)]
+    pub entity_id: u64,
+    pub resource_id: i32,
+    pub x: i32,
+    pub z: i32,
+    pub region_id: u8,
+    pub end_timestamp: Timestamp,
+}

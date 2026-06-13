@@ -111,7 +111,7 @@ async fn run_task(
                 biased;
                 _ = shutdown_rx => RunReason::Shutdown,
                 _ = tokio::time::sleep(delay) => RunReason::Scheduled,
-            }
+            },
         };
 
         match run_reason {

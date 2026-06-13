@@ -8,6 +8,7 @@ pub mod resources;
 #[table(accessor = relay_config)]
 pub struct RelayConfig {
     #[primary_key]
+    #[index(direct)]
     pub id: u8, // always 0
     pub identity: Identity,
 }

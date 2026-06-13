@@ -22,5 +22,6 @@ module = "prism-relay"
 
 [pipelines]
 resources = true
+growth_timers = true
 enemies = true
 players = true

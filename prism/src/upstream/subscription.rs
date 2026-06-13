@@ -20,6 +20,9 @@ pub enum Pipeline {
     /// `resource_state` + `location_state` join. Feeds the relay
     /// `resource_location` table (dim == 1).
     Resources,
+    /// `growth_state` - not joined on prism. Feeds the relay
+    /// `growth_timer` table, joined module-side to resources.
+    GrowthTimers,
     /// `enemy_state` + `mobile_entity_state` join. Feeds the relay
     /// `enemy_location` table (dim == 1).
     Enemies,
@@ -40,6 +43,12 @@ impl Pipeline {
                  JOIN resource_state res ON loc.entity_id = res.entity_id;"
                     .into(),
             ],
+            Pipeline::GrowthTimers => vec![
+                // filter out growth from placeable entities
+                "SELECT gs.* FROM growth_state gs \
+                 JOIN resource_state res ON gs.entity_id = res.entity_id;"
+                    .into(),
+            ],
             Pipeline::Enemies => vec![
                 "SELECT * FROM enemy_state;".into(),
                 "SELECT * FROM mobile_entity_state;".into(),
@@ -57,6 +66,9 @@ pub fn enabled_pipelines(cfg: &PipelinesConfig) -> Vec<Pipeline> {
     let mut out = Vec::new();
     if cfg.resources {
         out.push(Pipeline::Resources);
+    }
+    if cfg.growth_timers {
+        out.push(Pipeline::GrowthTimers);
     }
     if cfg.enemies {
         out.push(Pipeline::Enemies);

@@ -27,6 +27,12 @@ pub enum RelayMsg {
         region_id: u8,
         rows: Vec<ResourceRow>,
     },
+    /// Snapshot-phase payload for growth timers in this region.
+    /// This is insert-only (no table wipe) because resource replacement owns cleanup.
+    ReplaceGrowthTimers {
+        region_id: u8,
+        rows: Vec<GrowthTimerRow>,
+    },
     ReplaceEnemies {
         region_id: u8,
         rows: Vec<EnemyRow>,
@@ -41,6 +47,7 @@ pub enum RelayMsg {
     },
 
     InsertResource(ResourceRow),
+    InsertGrowthTimer(GrowthTimerRow),
     InsertEnemy(EnemyRow),
     UpsertPlayer(PlayerRow),
     UpsertPlayerState(PlayerStateRow),
@@ -80,6 +87,13 @@ pub struct ResourceRow {
     pub region_id: u8,
     pub x: i32,
     pub z: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct GrowthTimerRow {
+    pub entity_id: u64,
+    /// Unix-epoch timestamp in microseconds.
+    pub end_timestamp_micros: i64,
 }
 
 #[derive(Debug, Clone)]

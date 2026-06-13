@@ -1,6 +1,6 @@
 //! Latency-tiered batcher for the relay sink.
 //!
-//! Three flush timers: players ~250ms, enemies ~500ms, resources ~1000ms.
+//! Three flush timers: players ~500ms, enemies ~1000ms, resources ~2500ms.
 //! Replace* messages flush immediately (in chunks to stay under the 32MB
 //! WebSocket limit). Deletes are batched with their respective pipeline.
 //!
@@ -20,15 +20,17 @@ use std::time::Duration;
 use anyhow::Result;
 use log::{debug, error, info, warn};
 use relay_bindings::{
-    EnemyLocation, MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate, PlayerState,
-    ResourceLocation,
+    EnemyLocation, GrowthTimerUpdate, MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate,
+    PlayerState, ResourceLocation,
 };
+use relay_sdk::Timestamp;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::{Instant, interval_at};
 
 use super::connection::{RECONNECT_DELAY, RelayConnection};
 use super::{
-    EnemyRow, MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow, RelayMsg, ResourceRow,
+    EnemyRow, GrowthTimerRow, MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow, RelayMsg,
+    ResourceRow,
 };
 use crate::config::{Config, RelayConfig};
 use crate::shutdown::SharedShutdown;
@@ -48,6 +50,7 @@ const BULK_REPLACE_CHUNK: usize = 500_000;
 struct Batches {
     resource_inserts: Vec<ResourceLocation>,
     resource_deletes: Vec<u64>,
+    growth_timer_inserts: Vec<GrowthTimerUpdate>,
     enemy_inserts: Vec<EnemyLocation>,
     enemy_deletes: Vec<u64>,
     player_upserts: Vec<PlayerLocation>,
@@ -80,6 +83,12 @@ fn to_enemy_location(r: &EnemyRow) -> EnemyLocation {
         region_id: r.region_id,
         x: r.x,
         z: r.z,
+    }
+}
+fn to_growth_timer_update(r: &GrowthTimerRow) -> GrowthTimerUpdate {
+    GrowthTimerUpdate {
+        entity_id: r.entity_id,
+        end_timestamp: Timestamp::from_micros_since_unix_epoch(r.end_timestamp_micros),
     }
 }
 fn to_player_location(r: &PlayerRow) -> PlayerLocation {
@@ -219,12 +228,26 @@ pub async fn run(
                     // wipe what we just inserted.
                     RelayMsg::ReplaceResources { region_id, rows } => {
                         flush_resource_batch(&conn, &mut batches);
+                        flush_growth_batch(&conn, &mut batches);
                         let relay_rows: Vec<ResourceLocation> = rows.iter().map(to_resource_location).collect();
                         bulk_replace_chunked(
                             relay_rows,
                             |chunk| conn.bulk_replace_resources(region_id, chunk, rows.len() as u32),
                             |chunk| conn.insert_resources(chunk),
                             "resources",
+                            region_id,
+                        );
+                    }
+                    RelayMsg::ReplaceGrowthTimers { region_id, rows } => {
+                        // Growth timers depend on resource rows existing module-side.
+                        flush_resource_batch(&conn, &mut batches);
+                        flush_growth_batch(&conn, &mut batches);
+                        let relay_rows: Vec<GrowthTimerUpdate> = rows.iter().map(to_growth_timer_update).collect();
+                        bulk_replace_chunked(
+                            relay_rows,
+                            |chunk| conn.insert_growth_timers(chunk),
+                            |chunk| conn.insert_growth_timers(chunk),
+                            "growth_timers",
                             region_id,
                         );
                     }
@@ -264,6 +287,13 @@ pub async fn run(
                     RelayMsg::InsertResource(row) => {
                         batches.resource_inserts.push(to_resource_location(&row));
                         if batches.resource_inserts.len() >= MAX_BATCH { flush_resource_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::InsertGrowthTimer(row) => {
+                        batches.growth_timer_inserts.push(to_growth_timer_update(&row));
+                        if batches.growth_timer_inserts.len() >= MAX_BATCH {
+                            flush_resource_batch(&conn, &mut batches);
+                            flush_growth_batch(&conn, &mut batches);
+                        }
                     }
                     RelayMsg::InsertEnemy(row) => {
                         batches.enemy_inserts.push(to_enemy_location(&row));
@@ -320,12 +350,14 @@ pub async fn run(
             _ = resource_tick.tick() => {
                 if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
                 flush_resource_batch(&conn, &mut batches);
+                flush_growth_batch(&conn, &mut batches);
             }
         }
     }
 
     // Final flush, then cleanly disconnect.
     flush_resource_batch(&conn, &mut batches);
+    flush_growth_batch(&conn, &mut batches);
     flush_enemy_batch(&conn, &mut batches);
     flush_player_batch(&conn, &mut batches);
     flush_player_state_batch(&conn, &mut batches);
@@ -340,8 +372,13 @@ pub async fn run(
 
 /// Send a large set of rows as: chunk[0] via `replace_fn` (deletes region
 /// first), chunks[1..] via `upsert_fn` (insert-only).
-fn bulk_replace_chunked<T, FR, FU>(rows: Vec<T>, replace_fn: FR, upsert_fn: FU, kind: &'static str, region: u8)
-where
+fn bulk_replace_chunked<T, FR, FU>(
+    rows: Vec<T>,
+    replace_fn: FR,
+    upsert_fn: FU,
+    kind: &'static str,
+    region: u8,
+) where
     T: Clone,
     FR: Fn(Vec<T>) -> Result<()>,
     FU: Fn(Vec<T>) -> Result<()>,
@@ -381,6 +418,16 @@ fn flush_resource_batch(conn: &RelayConnection, batches: &mut Batches) {
         debug!("relay flush: delete_resources count={}", ids.len());
         if let Err(e) = conn.delete_resources(ids) {
             warn!("relay: delete_resources: {e:?}");
+        }
+    }
+}
+
+fn flush_growth_batch(conn: &RelayConnection, batches: &mut Batches) {
+    if !batches.growth_timer_inserts.is_empty() {
+        let rows = std::mem::take(&mut batches.growth_timer_inserts);
+        debug!("relay flush: insert_growth_timers count={}", rows.len());
+        if let Err(e) = conn.insert_growth_timers(rows) {
+            warn!("relay: insert_growth_timers: {e:?}");
         }
     }
 }

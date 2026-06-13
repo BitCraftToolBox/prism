@@ -16,8 +16,12 @@ pub mod delete_players_reducer;
 pub mod delete_resources_reducer;
 pub mod enemy_location_table;
 pub mod enemy_location_type;
+pub mod growth_timer_type;
+pub mod growth_timer_update_type;
+pub mod growth_timers_table;
 pub mod init_relay_reducer;
 pub mod insert_enemies_reducer;
+pub mod insert_growth_timers_reducer;
 pub mod insert_resources_reducer;
 pub mod mobile_move_update_type;
 pub mod move_mobile_entities_reducer;
@@ -45,8 +49,12 @@ pub use delete_players_reducer::delete_players;
 pub use delete_resources_reducer::delete_resources;
 pub use enemy_location_table::*;
 pub use enemy_location_type::EnemyLocation;
+pub use growth_timer_type::GrowthTimer;
+pub use growth_timer_update_type::GrowthTimerUpdate;
+pub use growth_timers_table::*;
 pub use init_relay_reducer::init_relay;
 pub use insert_enemies_reducer::insert_enemies;
+pub use insert_growth_timers_reducer::insert_growth_timers;
 pub use insert_resources_reducer::insert_resources;
 pub use mobile_move_update_type::MobileMoveUpdate;
 pub use move_mobile_entities_reducer::move_mobile_entities;
@@ -108,6 +116,9 @@ pub enum Reducer {
     InsertEnemies {
         rows: Vec<EnemyLocation>,
     },
+    InsertGrowthTimers {
+        timers: Vec<GrowthTimerUpdate>,
+    },
     InsertResources {
         rows: Vec<ResourceLocation>,
     },
@@ -148,6 +159,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteResources { .. } => "delete_resources",
             Reducer::InitRelay => "init_relay",
             Reducer::InsertEnemies { .. } => "insert_enemies",
+            Reducer::InsertGrowthTimers { .. } => "insert_growth_timers",
             Reducer::InsertResources { .. } => "insert_resources",
             Reducer::MoveMobileEntities { .. } => "move_mobile_entities",
             Reducer::RenamePlayers { .. } => "rename_players",
@@ -225,6 +237,11 @@ impl __sdk::Reducer for Reducer {
                     rows: rows.clone(),
                 })
             }
+            Reducer::InsertGrowthTimers { timers } => {
+                __sats::bsatn::to_vec(&insert_growth_timers_reducer::InsertGrowthTimersArgs {
+                    timers: timers.clone(),
+                })
+            }
             Reducer::InsertResources { rows } => {
                 __sats::bsatn::to_vec(&insert_resources_reducer::InsertResourcesArgs {
                     rows: rows.clone(),
@@ -270,6 +287,7 @@ impl __sdk::Reducer for Reducer {
 #[doc(hidden)]
 pub struct DbUpdate {
     enemy_location: __sdk::TableUpdate<EnemyLocation>,
+    growth_timers: __sdk::TableUpdate<GrowthTimer>,
     player_location: __sdk::TableUpdate<PlayerLocation>,
     player_state: __sdk::TableUpdate<PlayerState>,
     resource_location: __sdk::TableUpdate<ResourceLocation>,
@@ -284,6 +302,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "enemy_location" => db_update
                     .enemy_location
                     .append(enemy_location_table::parse_table_update(table_update)?),
+                "growth_timers" => db_update
+                    .growth_timers
+                    .append(growth_timers_table::parse_table_update(table_update)?),
                 "player_location" => db_update
                     .player_location
                     .append(player_location_table::parse_table_update(table_update)?),
@@ -322,6 +343,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.enemy_location = cache
             .apply_diff_to_table::<EnemyLocation>("enemy_location", &self.enemy_location)
             .with_updates_by_pk(|row| &row.entity_id);
+        diff.growth_timers = cache
+            .apply_diff_to_table::<GrowthTimer>("growth_timers", &self.growth_timers)
+            .with_updates_by_pk(|row| &row.entity_id);
         diff.player_location = cache
             .apply_diff_to_table::<PlayerLocation>("player_location", &self.player_location)
             .with_updates_by_pk(|row| &row.entity_id);
@@ -340,6 +364,9 @@ impl __sdk::DbUpdate for DbUpdate {
             match &table_rows.table[..] {
                 "enemy_location" => db_update
                     .enemy_location
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "growth_timers" => db_update
+                    .growth_timers
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "player_location" => db_update
                     .player_location
@@ -366,6 +393,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "enemy_location" => db_update
                     .enemy_location
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "growth_timers" => db_update
+                    .growth_timers
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "player_location" => db_update
                     .player_location
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -391,6 +421,7 @@ impl __sdk::DbUpdate for DbUpdate {
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
     enemy_location: __sdk::TableAppliedDiff<'r, EnemyLocation>,
+    growth_timers: __sdk::TableAppliedDiff<'r, GrowthTimer>,
     player_location: __sdk::TableAppliedDiff<'r, PlayerLocation>,
     player_state: __sdk::TableAppliedDiff<'r, PlayerState>,
     resource_location: __sdk::TableAppliedDiff<'r, ResourceLocation>,
@@ -410,6 +441,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<EnemyLocation>(
             "enemy_location",
             &self.enemy_location,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<GrowthTimer>(
+            "growth_timers",
+            &self.growth_timers,
             event,
         );
         callbacks.invoke_table_row_callbacks::<PlayerLocation>(
@@ -1088,12 +1124,14 @@ impl __sdk::SpacetimeModule for RemoteModule {
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
         enemy_location_table::register_table(client_cache);
+        growth_timers_table::register_table(client_cache);
         player_location_table::register_table(client_cache);
         player_state_table::register_table(client_cache);
         resource_location_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "enemy_location",
+        "growth_timers",
         "player_location",
         "player_state",
         "resource_location",
