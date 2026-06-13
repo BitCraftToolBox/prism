@@ -69,7 +69,7 @@ export function add_feature(
     const location = get_some_location(local_state.location);
     if (!location) return;
 
-    function findTimer(loc) {
+    function findTimer(loc: { x: number, z: number}) {
         // find first timer within 5 block radius. none of the things we're interested in tracking should ever be this close to overlap with another
         // i.e., vaults, hexite, maker's trees
         return growth_timers.find(t => Math.pow(t.location.x - loc.x, 2) + Math.pow(t.location.z - loc.z, 2) < 50);

@@ -17,11 +17,13 @@ publish-dev module="prism-relay" host="http://127.0.0.1:3000":
 
 # Regenerate Rust client bindings into relay-bindings/src.
 generate-bindings:
+    spacetime version use 2.4.0
     spacetime generate -y --lang rust --out-dir relay-bindings/src --module-path relay-module
     mv relay-bindings/src/mod.rs relay-bindings/src/lib.rs
 
 # Regen bindings for bitcraftmap - we don't want reducers bloating things there though so only keep the types.
 generate-map-bindings path="../bitcraftmap/src/relay-bindings":
+    spacetime version use 2.4.0
     spacetime generate -y --lang ts --out-dir {{path}} --module-path relay-module
 
 # --- prism workspace ---
