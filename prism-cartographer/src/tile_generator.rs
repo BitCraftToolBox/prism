@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use image::imageops::FilterType;
 use image::{ImageBuffer, Rgba, RgbaImage};
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,6 +10,12 @@ const RENDER_SIZE: f64 = 38400.0; // pixels at zoom 0
 const TILE_PX: u32 = 256;
 const MIN_ZOOM: i32 = -5;
 const MAX_ZOOM: i32 = 0;
+
+#[derive(Clone, Copy, Debug)]
+pub enum TileScaling {
+    Nearest,
+    Lanczos3,
+}
 
 struct TileRange {
     x_min: i32,
@@ -39,6 +46,7 @@ fn get_tile_range(crs_zoom: i32) -> TileRange {
 pub fn generate_tiles(
     img: &ImageBuffer<Rgba<u8>, Vec<u8>>,
     output_dir: &std::path::Path,
+    scaling: TileScaling,
     canceled: &AtomicBool,
 ) -> Result<()> {
     let (img_w, img_h) = img.dimensions();
@@ -68,8 +76,10 @@ pub fn generate_tiles(
             proj_h
         );
 
-        // Nearest-neighbor downscale keeps color fidelity for map imagery.
-        let resized = nn_downscale(img, img_w, img_h, proj_w, proj_h);
+        let resized = match scaling {
+            TileScaling::Nearest => nn_downscale(img, img_w, img_h, proj_w, proj_h),
+            TileScaling::Lanczos3 => image::imageops::resize(img, proj_w, proj_h, FilterType::Lanczos3),
+        };
 
         let mut count = 0u32;
         for tx in range.x_min..=range.x_max {
@@ -115,11 +125,12 @@ pub fn generate_tiles_from_raw(
     width: u32,
     height: u32,
     output_dir: &std::path::Path,
+    scaling: TileScaling,
     canceled: &AtomicBool,
 ) -> Result<()> {
     let owned: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, data.to_vec())
         .context("Invalid image dimensions for raw data")?;
-    generate_tiles(&owned, output_dir, canceled)
+    generate_tiles(&owned, output_dir, scaling, canceled)
 }
 
 fn nn_downscale(

@@ -268,7 +268,12 @@ pub fn render(
         "[terrain] generating tile pyramid → {}",
         tiles_dir.display()
     );
-    tile_generator::generate_tiles(&img, tiles_dir, canceled)?;
+    tile_generator::generate_tiles(
+        &img,
+        tiles_dir,
+        tile_generator::TileScaling::Nearest,
+        canceled,
+    )?;
 
     log::info!("[terrain] done");
     Ok(())

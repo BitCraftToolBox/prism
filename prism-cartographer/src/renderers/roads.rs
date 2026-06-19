@@ -157,7 +157,14 @@ pub fn render(
     let raw_data = render_hexagons(points, MAP_SIZE, MAP_SIZE)?;
 
     log::info!("[roads] generating tile pyramid → {}", tiles_dir.display());
-    tile_generator::generate_tiles_from_raw(&raw_data, MAP_SIZE, MAP_SIZE, tiles_dir, canceled)?;
+    tile_generator::generate_tiles_from_raw(
+        &raw_data,
+        MAP_SIZE,
+        MAP_SIZE,
+        tiles_dir,
+        tile_generator::TileScaling::Lanczos3,
+        canceled,
+    )?;
 
     log::info!("[roads] done");
     Ok(())

@@ -96,7 +96,12 @@ pub fn render(tiles_dir: &Path, canceled: &AtomicBool) -> Result<()> {
         });
 
     log::info!("[game] generating tile pyramid → {}", tiles_dir.display());
-    tile_generator::generate_tiles(&tiling_rgba, tiles_dir, canceled)?;
+    tile_generator::generate_tiles(
+        &tiling_rgba,
+        tiles_dir,
+        tile_generator::TileScaling::Nearest,
+        canceled,
+    )?;
 
     log::info!("[game] done");
     Ok(())
