@@ -12,7 +12,7 @@ tables = [
     { name = "bank_state" },
     { name = "marketplace_state" },
     { name = "world_region_name_state" },
-    { name = "growth_state", query = "SELECT * FROM growth_state;" },
+    { name = "growth_state", query = "SELECT gs.* FROM growth_state gs JOIN resource_state res ON res.entity_id = gs.entity_id;" },
     { name = "location_state", output_file = "timer_locations", query = "SELECT loc.* FROM growth_state gs JOIN location_state loc ON gs.entity_id = loc.entity_id;" },
 ]
 $REGIONS$
