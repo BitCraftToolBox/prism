@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use image::imageops::FilterType;
+use fast_image_resize as fir;
 use image::{ImageBuffer, Rgba, RgbaImage};
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -78,8 +78,10 @@ pub fn generate_tiles(
 
         let resized = match scaling {
             TileScaling::Nearest => nn_downscale(img, img_w, img_h, proj_w, proj_h),
-            TileScaling::Lanczos3 => image::imageops::resize(img, proj_w, proj_h, FilterType::Lanczos3),
+            TileScaling::Lanczos3 => lanczos3_downscale(img, proj_w, proj_h)?,
         };
+
+        log::info!("resized");
 
         let mut count = 0u32;
         for tx in range.x_min..=range.x_max {
@@ -117,6 +119,23 @@ pub fn generate_tiles(
 
     log::info!("[tiles] total tiles generated: {}", total);
     Ok(())
+}
+
+fn lanczos3_downscale(
+    img: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    dst_w: u32,
+    dst_h: u32,
+) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let mut dst = fir::images::Image::new(dst_w, dst_h, fir::PixelType::U8x4);
+    let options = fir::ResizeOptions::new()
+        .resize_alg(fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3));
+    let mut resizer = fir::Resizer::new();
+    resizer
+        .resize(img, &mut dst, Some(&options))
+        .context("Lanczos3 resize failed")?;
+
+    ImageBuffer::from_raw(dst_w, dst_h, dst.into_vec())
+        .context("Invalid destination dimensions after Lanczos3 resize")
 }
 
 /// Same as `generate_tiles` but accepts raw RGBA bytes + dimensions.
