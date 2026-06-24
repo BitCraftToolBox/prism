@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use hashbrown::HashMap;
 use log::{debug, error, info, warn};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -79,7 +78,6 @@ pub async fn run(
     tokio::pin!(shutdown_signal);
 
     let mut buffer: Vec<PlayerLocationRow> = Vec::new();
-    let mut last_pos: HashMap<u64, (i32, i32)> = HashMap::new();
 
     let now = Instant::now();
     let mut flush_tick = interval_at(
@@ -103,12 +101,6 @@ pub async fn run(
                 };
                 match msg {
                     HistoryMsg::PlayerLocation { entity_id, timestamp, x, z } => {
-                        // Dedup: skip if same large hex tile as last sample.
-                        let cell = (x / 3000, z / 3000);
-                        if last_pos.get(&entity_id).is_some_and(|prev| *prev == cell) {
-                            continue;
-                        }
-                        last_pos.insert(entity_id, cell);
                         buffer.push(PlayerLocationRow { entity_id, timestamp, x, z });
                         if buffer.len() >= MAX_BATCH {
                             flush(&pool, &mut buffer).await;
@@ -149,7 +141,7 @@ async fn flush(pool: &PgPool, buffer: &mut Vec<PlayerLocationRow>) {
     );
 
     // Collect column arrays for unnest bulk insert.
-    // Casting u64 → i64 is safe: game entity IDs and timestamps (µs since epoch)
+    // Casting u64 → i64 is safe: game entity IDs and timestamps (ms since epoch)
     // are well within the signed i64 range for any reasonable game timestamp.
     let entity_ids: Vec<i64> = rows.iter().map(|r| r.entity_id as i64).collect();
     let timestamps: Vec<i64> = rows.iter().map(|r| r.timestamp as i64).collect();
@@ -158,10 +150,9 @@ async fn flush(pool: &PgPool, buffer: &mut Vec<PlayerLocationRow>) {
 
     if let Err(e) = sqlx::query(
         "INSERT INTO player_locations (entity_id, x, z, recorded_at) \
-         SELECT entity_id, x, z, \
-                'epoch'::timestamptz + ts_us * interval '1 microsecond' \
+         SELECT entity_id, x, z, to_timestamp(ts_ms::double precision / 1000.0) \
          FROM unnest($1::bigint[], $2::int[], $3::int[], $4::bigint[]) \
-              AS t(entity_id, x, z, ts_us)",
+              AS t(entity_id, x, z, ts_ms)",
     )
     .bind(&entity_ids[..])
     .bind(&xs[..])

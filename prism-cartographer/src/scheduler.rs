@@ -336,12 +336,12 @@ fn tiles_dir_for(renderer: RendererKind, output_dir: &Path) -> PathBuf {
 /// executed:
 ///
 /// * `{}` — absolute path of the committed output directory
-///           (e.g. `/data/roads/tiles`)
+///   (e.g. `/data/roads/tiles`)
 /// * `{root}` — absolute path of `config.output_dir`, the common root that
-///              all renderer outputs live under (e.g. `/data`).  Together with
-///              `{}` the script can derive the relative sub-path
-///              (`roads/tiles`) and recreate the same directory hierarchy on
-///              the remote side.
+///   all renderer outputs live under (e.g. `/data`).  Together with
+///   `{}` the script can derive the relative sub-path
+///   (`roads/tiles`) and recreate the same directory hierarchy on
+///   the remote side.
 ///
 /// Example config:
 ///   run_on_complete = "/app/upload_tiles.sh {} {root}"

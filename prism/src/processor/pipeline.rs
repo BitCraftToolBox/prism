@@ -310,11 +310,22 @@ fn emit_deltas(
                 z,
             });
             if region.player_entity_ids.contains(&eid) {
+                // Dedup: skip if same large hex tile as deleted row.
+                if let Some(prev) = update
+                    .mobile_entity_state
+                    .deletes
+                    .iter()
+                    .find(|ei| ei.row.entity_id == eid)
+                    && prev.row.location_x / 3000 == e.row.location_x / 3000
+                    && prev.row.location_z / 3000 == e.row.location_z / 3000
+                {
+                    continue;
+                }
                 history_msgs.push(HistoryMsg::PlayerLocation {
                     entity_id: eid,
                     timestamp: e.row.timestamp,
-                    x,
-                    z,
+                    x: x / 3000,
+                    z: z / 3000,
                 });
             }
         }
