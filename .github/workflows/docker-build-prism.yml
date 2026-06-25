@@ -21,7 +21,7 @@ jobs:
       REGISTRY: ghcr.io
       IMAGE_NAME: bitcrafttoolbox/prism
     permissions:
-      contents: read
+      contents: write
       packages: write
       attestations: write
       id-token: write
