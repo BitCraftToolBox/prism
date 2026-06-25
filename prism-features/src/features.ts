@@ -106,7 +106,12 @@ export function add_feature(
             outputs.uncharted.push(make_feature({
                 name: claim_name,
                 iconName: 'hermit-crab',
-                iconSize: [25, 25]
+            }, location.x, location.z));
+            break;
+        case 203609893:
+            outputs.uncharted.push(make_feature({
+                name: claim_name,
+                iconName: 'shipwreck',
             }, location.x, location.z));
             break;
         case 489406613:
