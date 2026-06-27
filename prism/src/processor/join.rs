@@ -167,9 +167,27 @@ impl RegionJoinState {
             .map(|recipe| RecipeMetaRow {
                 id: recipe.0.clone(),
                 effort_required: recipe.1.actions_required,
-                skill_id: recipe.1.level_requirements.iter().next().map(|r| r.skill_id).unwrap_or(0),
-                exp_per_progress: recipe.1.experience_per_progress.iter().next().map(|s| s.quantity).unwrap_or(0f32),
-                level_required: recipe.1.level_requirements.iter().next().map(|r| r.level).unwrap_or(0),
+                skill_id: recipe
+                    .1
+                    .level_requirements
+                    .iter()
+                    .next()
+                    .map(|r| r.skill_id)
+                    .unwrap_or(0),
+                exp_per_progress: recipe
+                    .1
+                    .experience_per_progress
+                    .iter()
+                    .next()
+                    .map(|s| s.quantity)
+                    .unwrap_or(0f32),
+                level_required: recipe
+                    .1
+                    .level_requirements
+                    .iter()
+                    .next()
+                    .map(|r| r.level)
+                    .unwrap_or(0),
             })
             .collect()
     }

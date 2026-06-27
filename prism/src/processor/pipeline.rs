@@ -16,7 +16,7 @@ use crate::relay::{
 };
 use crate::upstream::{Phase, RegionUpdate};
 use anyhow::Result;
-use log::{debug, info, warn};
+use log::{debug, info};
 use upstream_bindings::region::DbUpdate;
 
 const OVERWORLD_DIM: u32 = 1;
@@ -61,6 +61,8 @@ pub async fn handle(
         let player_states = region.snapshot_player_states(region_id);
         let recipe_rows = region.snapshot_recipe_meta();
         let crafts = region.snapshot_crafts(region_id, timestamp_micros);
+        let history_recipe_rows = recipe_rows.clone();
+        let history_crafts = crafts.clone();
         info!(
             "initial snapshot ready — emitting bulk replace: region_id={} resources={} growth_timers={} enemies={} players={} player_states={} recipes={} crafts={}",
             region_id,
@@ -103,9 +105,17 @@ pub async fn handle(
             ]
             .into_iter(),
         );
-        // Skip sending HistoryMsg - initial subscription may give us stale state
-        // (e.g. offline player locations), which we don't want to record.
-        // Instead, we'll only record the first movement we get after the live phase.
+        send_history(
+            &sinks.history_tx,
+            [
+                HistoryMsg::UpsertRecipeMeta(history_recipe_rows),
+                HistoryMsg::UpsertCrafts(history_crafts),
+            ]
+            .into_iter(),
+        );
+        // We still skip initial player-location samples because initial
+        // subscription rows can be stale (e.g. offline player locations).
+        // Craft/recipe state is mirrored above from the initial snapshot.
 
         // The snapshot is done; all sync-phase caches are no longer needed.
         // clear_live_caches seeds player_entity_ids and drops the rest.
@@ -151,9 +161,7 @@ fn update_join_maps(
             region.recipe_map.remove(&e.row.id);
         }
         for e in &update.crafting_recipe_desc.inserts {
-            region
-                .recipe_map
-                .insert(e.row.id, e.row.clone());
+            region.recipe_map.insert(e.row.id, e.row.clone());
         }
         for e in &update.public_progressive_action_state.deletes {
             region.public_craft_ids.remove(&e.row.entity_id);
@@ -481,9 +489,27 @@ fn emit_deltas(
         recipe_upserts.push(RecipeMetaRow {
             id: e.row.id,
             effort_required: e.row.actions_required,
-            skill_id: e.row.level_requirements.iter().next().map(|r| r.skill_id).unwrap_or(0),
-            exp_per_progress: e.row.experience_per_progress.iter().next().map(|e| e.quantity).unwrap_or(0f32),
-            level_required: e.row.level_requirements.iter().next().map(|r| r.level).unwrap_or(0),
+            skill_id: e
+                .row
+                .level_requirements
+                .iter()
+                .next()
+                .map(|r| r.skill_id)
+                .unwrap_or(0),
+            exp_per_progress: e
+                .row
+                .experience_per_progress
+                .iter()
+                .next()
+                .map(|e| e.quantity)
+                .unwrap_or(0f32),
+            level_required: e
+                .row
+                .level_requirements
+                .iter()
+                .next()
+                .map(|r| r.level)
+                .unwrap_or(0),
         });
     }
     for e in &update.crafting_recipe_desc.deletes {
@@ -639,30 +665,37 @@ fn emit_deltas(
         );
     }
     if !recipe_upserts.is_empty() {
+        history_msgs.push(HistoryMsg::UpsertRecipeMeta(recipe_upserts.clone()));
         send_relay(
             &sinks.relay_tx,
             std::iter::once(RelayMsg::UpsertRecipeMeta(recipe_upserts)),
         );
     }
     if !recipe_deletes.is_empty() {
+        history_msgs.push(HistoryMsg::DeleteRecipeMeta(recipe_deletes.clone()));
         send_relay(
             &sinks.relay_tx,
             std::iter::once(RelayMsg::DeleteRecipeMeta(recipe_deletes)),
         );
     }
     if !craft_upserts.is_empty() {
+        history_msgs.push(HistoryMsg::UpsertCrafts(craft_upserts.clone()));
         send_relay(
             &sinks.relay_tx,
             std::iter::once(RelayMsg::UpsertCrafts(craft_upserts)),
         );
     }
     if !craft_public_updates.is_empty() {
+        history_msgs.push(HistoryMsg::ToggleCraftPublic(craft_public_updates.clone()));
         send_relay(
             &sinks.relay_tx,
             std::iter::once(RelayMsg::ToggleCraftPublic(craft_public_updates)),
         );
     }
     if !craft_progress_deltas.is_empty() {
+        history_msgs.push(HistoryMsg::ApplyCraftProgressDeltas(
+            craft_progress_deltas.clone(),
+        ));
         send_relay(
             &sinks.relay_tx,
             std::iter::once(RelayMsg::ApplyCraftProgressDeltas(craft_progress_deltas)),
@@ -674,13 +707,7 @@ fn emit_deltas(
             std::iter::once(RelayMsg::ScheduleCraftExpiry(craft_expiry_ids)),
         );
     }
-    for msg in history_msgs {
-        if let Some(tx) = &sinks.history_tx
-            && let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = tx.try_send(msg)
-        {
-            warn!("history channel full — dropping player location sample");
-        }
-    }
+    send_history(&sinks.history_tx, history_msgs.into_iter());
 }
 
 fn has_progressive_action_state_change(update: &DbUpdate, eid: u64) -> bool {
@@ -705,6 +732,24 @@ fn send_relay(tx: &tokio::sync::mpsc::Sender<RelayMsg>, msgs: impl Iterator<Item
     }
     if dropped > 0 {
         debug!("relay channel full — dropped {} messages", dropped);
+    }
+}
+
+fn send_history(
+    tx: &Option<tokio::sync::mpsc::Sender<HistoryMsg>>,
+    msgs: impl Iterator<Item = HistoryMsg>,
+) {
+    let Some(tx) = tx else {
+        return;
+    };
+    let mut dropped = 0usize;
+    for msg in msgs {
+        if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = tx.try_send(msg) {
+            dropped += 1;
+        }
+    }
+    if dropped > 0 {
+        debug!("history channel full — dropped {} messages", dropped);
     }
 }
 
