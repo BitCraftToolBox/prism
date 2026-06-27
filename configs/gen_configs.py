@@ -11,6 +11,7 @@ region_groups = {
 }
 
 mapper = [7, 8, 9, 12, 13, 14, 17, 18, 19, 3, 11, 15, 23]
+craft_mon = list(mapper)
 
 out_dir = sys.argv[1] if len(sys.argv) > 1 else ""
 
@@ -58,6 +59,7 @@ resources = false
 enemies = false
 players = false
 growth_timers = false
+crafts = false
 """
 m_d_1 = """
 [[upstream.regions.dumps]]
@@ -96,5 +98,33 @@ if mapper:
         m_offset_1 += 2
         m_offset_2 += 1
     output += m_p
+    with open(os.path.join(out_dir, outfile), "w") as f:
+        f.write(output)
+
+c_h = """\
+[upstream]
+host = "https://bitcraft-early-access.spacetimedb.com"
+"""
+c_b = """
+[relay]
+uri = "ws://spacetimedb:3000"
+module = "prism-relay"
+
+[pipelines]
+resources = false
+growth_timers = false
+enemies = false
+players = false
+crafts = true
+"""
+
+if craft_mon:
+    outfile = "craftmon.toml"
+    output = c_h
+    for region in craft_mon:
+        output += "\n[[upstream.regions]]\n"\
+                  f"name = \"bitcraft-live-{region}\"\n"\
+                  f"id = {region}\n"
+    output += c_b
     with open(os.path.join(out_dir, outfile), "w") as f:
         f.write(output)

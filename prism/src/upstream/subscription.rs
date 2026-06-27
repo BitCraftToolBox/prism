@@ -30,6 +30,11 @@ pub enum Pipeline {
     /// `player_location` table (dim == 1) **and** the history sink
     /// (heatmap, dim == 1).
     Players,
+    /// `user_state` (for reducer identity mapping) +
+    /// `progressive_action_state` + `public_progressive_action_state` (public flag) +
+    /// `crafting_recipe_desc` (for stats) + `building_state` (for claim id).
+    /// Feeds craft meta, progress, and contribution (and recipe meta).
+    Crafts,
 }
 
 impl Pipeline {
@@ -58,6 +63,13 @@ impl Pipeline {
                 "SELECT * FROM player_username_state;".into(),
                 "SELECT * FROM signed_in_player_state;".into(),
             ],
+            Pipeline::Crafts => vec![
+                "SELECT * FROM crafting_recipe_desc;".into(),
+                "SELECT * FROM user_state;".into(),
+                "SELECT * FROM progressive_action_state;".into(),
+                "SELECT * FROM public_progressive_action_state;".into(),
+                "SELECT * FROM building_state;".into(),
+            ],
         }
     }
 }
@@ -75,6 +87,9 @@ pub fn enabled_pipelines(cfg: &PipelinesConfig) -> Vec<Pipeline> {
     }
     if cfg.players {
         out.push(Pipeline::Players);
+    }
+    if cfg.crafts {
+        out.push(Pipeline::Crafts);
     }
     out
 }

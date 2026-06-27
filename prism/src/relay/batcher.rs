@@ -20,8 +20,9 @@ use std::time::Duration;
 use anyhow::Result;
 use log::{debug, error, info, warn};
 use relay_bindings::{
-    EnemyLocation, GrowthTimerUpdate, MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate,
-    PlayerState, ResourceLocation,
+    CraftContributionDelta, CraftPublicUpdate, CraftUpdate, EnemyLocation, GrowthTimerUpdate,
+    MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate, PlayerState, RecipeMeta,
+    ResourceLocation,
 };
 use relay_sdk::Timestamp;
 use tokio::sync::mpsc::Receiver;
@@ -29,7 +30,8 @@ use tokio::time::{Instant, interval_at};
 
 use super::connection::{RECONNECT_DELAY, RelayConnection};
 use super::{
-    EnemyRow, GrowthTimerRow, MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow, RelayMsg,
+    CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow,
+    MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RelayMsg,
     ResourceRow,
 };
 use crate::config::{Config, RelayConfig};
@@ -65,6 +67,12 @@ struct Batches {
     player_offline_ids: Vec<u64>,
     /// Live-phase: name-only updates for existing player_state rows.
     player_renames: Vec<PlayerRenameUpdate>,
+    craft_upserts: Vec<CraftUpdate>,
+    recipe_upserts: Vec<RecipeMeta>,
+    recipe_deletes: Vec<i32>,
+    craft_public_updates: Vec<CraftPublicUpdate>,
+    craft_progress_deltas: Vec<CraftContributionDelta>,
+    craft_expiry_ids: Vec<u64>,
 }
 
 fn to_resource_location(r: &ResourceRow) -> ResourceLocation {
@@ -119,6 +127,45 @@ fn to_player_rename_update(r: &PlayerRenameRow) -> PlayerRenameUpdate {
     PlayerRenameUpdate {
         entity_id: r.entity_id,
         name: r.name.clone(),
+    }
+}
+fn to_recipe_meta(r: &RecipeMetaRow) -> RecipeMeta {
+    RecipeMeta {
+        id: r.id,
+        effort_required: r.effort_required,
+        skill_id: r.skill_id,
+        exp_per_progress: r.exp_per_progress,
+        level_required: r.level_required,
+    }
+}
+fn to_craft_update(r: &CraftUpdateRow) -> CraftUpdate {
+    CraftUpdate {
+        entity_id: r.entity_id,
+        owner_entity_id: r.owner_entity_id,
+        claim_entity_id: r.claim_entity_id,
+        building_entity_id: r.building_entity_id,
+        first_seen: Timestamp::from_micros_since_unix_epoch(r.first_seen_micros),
+        recipe_id: r.recipe_id,
+        count: r.count,
+        region_id: r.region_id,
+        public: r.public,
+        progress: r.progress,
+        last_seen: Timestamp::from_micros_since_unix_epoch(r.last_seen_micros),
+    }
+}
+fn to_craft_public_update(r: &CraftPublicUpdateRow) -> CraftPublicUpdate {
+    CraftPublicUpdate {
+        craft_id: r.craft_id,
+        public: r.public,
+    }
+}
+fn to_craft_progress_delta(r: &CraftContributionDeltaRow) -> CraftContributionDelta {
+    CraftContributionDelta {
+        craft_id: r.craft_id,
+        player_id: r.player_id,
+        progress_delta: r.progress_delta,
+        progress_total: r.progress_total,
+        last_seen: Timestamp::from_micros_since_unix_epoch(r.last_seen_micros),
     }
 }
 
@@ -284,6 +331,23 @@ pub async fn run(
                             region_id,
                         );
                     }
+                    RelayMsg::ReplaceCrafts { region_id, recipe_rows, rows } => {
+                        flush_craft_batch(&conn, &mut batches);
+                        if !recipe_rows.is_empty() {
+                            let recipes: Vec<RecipeMeta> = recipe_rows.iter().map(to_recipe_meta).collect();
+                            if let Err(e) = conn.upsert_recipe_meta(recipes) {
+                                warn!("relay: upsert_recipe_meta: {e:?}");
+                            }
+                        }
+                        let relay_rows: Vec<CraftUpdate> = rows.iter().map(to_craft_update).collect();
+                        bulk_replace_chunked(
+                            relay_rows,
+                            |chunk| conn.upsert_crafts(chunk),
+                            |chunk| conn.upsert_crafts(chunk),
+                            "crafts",
+                            region_id,
+                        );
+                    }
                     RelayMsg::InsertResource(row) => {
                         batches.resource_inserts.push(to_resource_location(&row));
                         if batches.resource_inserts.len() >= MAX_BATCH { flush_resource_batch(&conn, &mut batches); }
@@ -331,6 +395,30 @@ pub async fn run(
                         batches.player_renames.extend(renames.iter().map(to_player_rename_update));
                         if batches.player_renames.len() >= MAX_BATCH { flush_player_renames(&conn, &mut batches); }
                     }
+                    RelayMsg::UpsertCrafts(rows) => {
+                        batches.craft_upserts.extend(rows.iter().map(to_craft_update));
+                        if batches.craft_upserts.len() >= MAX_BATCH { flush_craft_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::UpsertRecipeMeta(rows) => {
+                        batches.recipe_upserts.extend(rows.iter().map(to_recipe_meta));
+                        if batches.recipe_upserts.len() >= MAX_BATCH { flush_craft_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::DeleteRecipeMeta(ids) => {
+                        batches.recipe_deletes.extend(ids);
+                        if batches.recipe_deletes.len() >= MAX_BATCH { flush_craft_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::ToggleCraftPublic(rows) => {
+                        batches.craft_public_updates.extend(rows.iter().map(to_craft_public_update));
+                        if batches.craft_public_updates.len() >= MAX_BATCH { flush_craft_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::ApplyCraftProgressDeltas(rows) => {
+                        batches.craft_progress_deltas.extend(rows.iter().map(to_craft_progress_delta));
+                        if batches.craft_progress_deltas.len() >= MAX_BATCH { flush_craft_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::ScheduleCraftExpiry(craft_ids) => {
+                        batches.craft_expiry_ids.extend(craft_ids);
+                        if batches.craft_expiry_ids.len() >= MAX_BATCH { flush_craft_batch(&conn, &mut batches); }
+                    }
                 }
             }
 
@@ -342,6 +430,7 @@ pub async fn run(
                 flush_player_online(&conn, &mut batches);
                 flush_player_offline(&conn, &mut batches);
                 flush_player_renames(&conn, &mut batches);
+                flush_craft_batch(&conn, &mut batches);
             }
             _ = enemy_tick.tick() => {
                 if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
@@ -365,6 +454,7 @@ pub async fn run(
     flush_player_online(&conn, &mut batches);
     flush_player_offline(&conn, &mut batches);
     flush_player_renames(&conn, &mut batches);
+    flush_craft_batch(&conn, &mut batches);
     info!("relay batcher: disconnecting...");
     conn.disconnect();
     Ok(())
@@ -519,6 +609,57 @@ fn flush_player_renames(conn: &RelayConnection, batches: &mut Batches) {
         debug!("relay flush: rename_players count={}", renames.len());
         if let Err(e) = conn.rename_players(renames) {
             warn!("relay: rename_players: {e:?}");
+        }
+    }
+}
+
+fn flush_craft_batch(conn: &RelayConnection, batches: &mut Batches) {
+    if !batches.recipe_upserts.is_empty() {
+        let rows = std::mem::take(&mut batches.recipe_upserts);
+        debug!("relay flush: upsert_recipe_meta count={}", rows.len());
+        if let Err(e) = conn.upsert_recipe_meta(rows) {
+            warn!("relay: upsert_recipe_meta: {e:?}");
+        }
+    }
+    if !batches.recipe_deletes.is_empty() {
+        let ids = std::mem::take(&mut batches.recipe_deletes);
+        debug!("relay flush: delete_recipe_meta count={}", ids.len());
+        if let Err(e) = conn.delete_recipe_meta(ids) {
+            warn!("relay: delete_recipe_meta: {e:?}");
+        }
+    }
+    if !batches.craft_upserts.is_empty() {
+        let rows = std::mem::take(&mut batches.craft_upserts);
+        debug!("relay flush: upsert_crafts count={}", rows.len());
+        if let Err(e) = conn.upsert_crafts(rows) {
+            warn!("relay: upsert_crafts: {e:?}");
+        }
+    }
+    if !batches.craft_public_updates.is_empty() {
+        let rows = std::mem::take(&mut batches.craft_public_updates);
+        debug!("relay flush: toggle_public count={}", rows.len());
+        if let Err(e) = conn.toggle_public(rows) {
+            warn!("relay: toggle_public: {e:?}");
+        }
+    }
+    if !batches.craft_progress_deltas.is_empty() {
+        let rows = std::mem::take(&mut batches.craft_progress_deltas);
+        debug!(
+            "relay flush: apply_craft_progress_deltas count={}",
+            rows.len()
+        );
+        if let Err(e) = conn.apply_craft_progress_deltas(rows) {
+            warn!("relay: apply_craft_progress_deltas: {e:?}");
+        }
+    }
+    if !batches.craft_expiry_ids.is_empty() {
+        let craft_ids = std::mem::take(&mut batches.craft_expiry_ids);
+        debug!(
+            "relay flush: schedule_craft_expiry count={}",
+            craft_ids.len()
+        );
+        if let Err(e) = conn.schedule_craft_expiry(craft_ids) {
+            warn!("relay: schedule_craft_expiry: {e:?}");
         }
     }
 }

@@ -1,5 +1,6 @@
 use spacetimedb::{Identity, table};
 
+pub mod crafts;
 pub mod enemies;
 pub mod players;
 pub mod resources;

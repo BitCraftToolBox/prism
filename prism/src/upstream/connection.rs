@@ -13,10 +13,10 @@ use log::{debug, error, info, warn};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::{Sender, UnboundedSender, unbounded_channel};
 use upstream_bindings::ext::ctx::RunUntil;
-use upstream_bindings::region::{DbConnection, DbUpdate};
-use upstream_bindings::sdk::DbContext;
+use upstream_bindings::region::{DbConnection, DbUpdate, Reducer};
+use upstream_bindings::sdk::{DbContext, Event};
 
-use super::subscription::{enabled_pipelines, queue_subscribe};
+use super::subscription::{Pipeline, enabled_pipelines, queue_subscribe};
 use super::{Phase, RegionUpdate, SharedPhase, load_phase, store_phase};
 use crate::config::{Config, DumpScheduleConfig, RegionConfig};
 use crate::dumper::table_extract::SupportedTable;
@@ -89,7 +89,7 @@ pub async fn run_region(
 
         // The cacheless update channel is private to one connection — we
         // drain it from a helper task that re-emits tagged updates.
-        let (cache_tx, mut cache_rx) = unbounded_channel::<DbUpdate>();
+        let (cache_tx, mut cache_rx) = unbounded_channel::<(DbUpdate, Event<Reducer>)>();
         let drain_phase = phase.clone();
         let drain_tx = proc_tx.clone();
         let drain_region = region.id;
@@ -98,7 +98,8 @@ pub async fn run_region(
                 let _ = drain_tx.send(RegionUpdate {
                     region_id: drain_region,
                     phase: load_phase(&drain_phase),
-                    update,
+                    update: update.0,
+                    reducer: update.1,
                 });
             }
         });
@@ -109,14 +110,15 @@ pub async fn run_region(
         let region_name_for_disconnect = region.name.clone();
         let connected_this_attempt = Arc::new(AtomicBool::new(false));
         let connected_flag = connected_this_attempt.clone();
+        let light = !pipelines.contains(&Pipeline::Crafts);
 
         info!("[{}] connecting...", region.name);
         let built = DbConnection::builder()
             .with_uri(&host)
             .with_module_name(&region.name)
             .with_token(Some(&token))
-            .with_light_mode(true)
-            .with_channel(cache_tx.clone())
+            .with_light_mode(light)
+            .with_channel_and_event(cache_tx.clone())
             .on_connect(move |ctx, _id, _tok| {
                 connected_flag.store(true, Ordering::Relaxed);
                 info!(

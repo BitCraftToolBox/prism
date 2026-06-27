@@ -17,16 +17,16 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::Sender;
-use upstream_bindings::region::DbUpdate;
-
-#[cfg(unix)]
-use log::{error, info};
-#[cfg(unix)]
-use tokio::signal::unix::{SignalKind, signal};
+use upstream_bindings::region::{DbUpdate, Reducer};
 
 use crate::config::Config;
 use crate::dumper::DumpMsg;
 use crate::shutdown::SharedShutdown;
+#[cfg(unix)]
+use log::{error, info};
+#[cfg(unix)]
+use tokio::signal::unix::{SignalKind, signal};
+use upstream_bindings::sdk::Event;
 
 /// A region update destined for the processor. Carries the originating region
 /// id and the sync phase at the moment it was drained from the cacheless
@@ -35,6 +35,7 @@ pub struct RegionUpdate {
     pub region_id: u8,
     pub phase: Phase,
     pub update: DbUpdate,
+    pub reducer: Event<Reducer>,
 }
 
 /// Per-region sync phase. Stored as an `AtomicU8` shared between the

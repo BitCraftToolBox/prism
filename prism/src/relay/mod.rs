@@ -45,12 +45,23 @@ pub enum RelayMsg {
         region_id: u8,
         rows: Vec<PlayerStateRow>,
     },
+    ReplaceCrafts {
+        region_id: u8,
+        recipe_rows: Vec<RecipeMetaRow>,
+        rows: Vec<CraftUpdateRow>,
+    },
 
     InsertResource(ResourceRow),
     InsertGrowthTimer(GrowthTimerRow),
     InsertEnemy(EnemyRow),
     UpsertPlayer(PlayerRow),
     UpsertPlayerState(PlayerStateRow),
+    UpsertCrafts(Vec<CraftUpdateRow>),
+    UpsertRecipeMeta(Vec<RecipeMetaRow>),
+    DeleteRecipeMeta(Vec<i32>),
+    ToggleCraftPublic(Vec<CraftPublicUpdateRow>),
+    ApplyCraftProgressDeltas(Vec<CraftContributionDeltaRow>),
+    ScheduleCraftExpiry(Vec<u64>),
 
     DeleteResource(u64),
     DeleteEnemy(u64),
@@ -119,6 +130,45 @@ pub struct PlayerStateRow {
     pub region_id: u8,
     pub online: bool,
     pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecipeMetaRow {
+    pub id: i32,
+    pub effort_required: i32,
+    pub skill_id: i32,
+    pub exp_per_progress: f32,
+    pub level_required: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct CraftUpdateRow {
+    pub entity_id: u64,
+    pub owner_entity_id: u64,
+    pub claim_entity_id: u64,
+    pub building_entity_id: u64,
+    pub first_seen_micros: i64,
+    pub recipe_id: i32,
+    pub count: i32,
+    pub region_id: u8,
+    pub public: bool,
+    pub progress: i32,
+    pub last_seen_micros: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct CraftPublicUpdateRow {
+    pub craft_id: u64,
+    pub public: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CraftContributionDeltaRow {
+    pub craft_id: u64,
+    pub player_id: u64,
+    pub progress_delta: i32,
+    pub progress_total: i32,
+    pub last_seen_micros: i64,
 }
 
 pub async fn run(

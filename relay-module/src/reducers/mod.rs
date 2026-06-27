@@ -3,6 +3,7 @@ use spacetimedb::{ReducerContext, Table, reducer};
 use crate::tables::RelayConfig;
 use crate::tables::relay_config;
 
+pub mod crafts;
 pub mod enemies;
 pub mod mobs;
 pub mod players;

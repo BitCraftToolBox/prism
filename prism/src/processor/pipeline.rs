@@ -7,14 +7,17 @@
 //! Phase::Live update, at which point we emit coherent bulk Replace messages
 //! covering everything accumulated so far.
 
+use super::ProcessorHandle;
+use super::join::{EntityLocation, JoinState, ProgressiveCraftState};
+use crate::history::HistoryMsg;
+use crate::relay::{
+    CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow,
+    PlayerRow, PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow,
+};
+use crate::upstream::{Phase, RegionUpdate};
 use anyhow::Result;
 use log::{debug, info, warn};
-
-use super::ProcessorHandle;
-use super::join::{EntityLocation, JoinState};
-use crate::history::HistoryMsg;
-use crate::relay::{EnemyRow, GrowthTimerRow, PlayerRow, PlayerStateRow, RelayMsg, ResourceRow};
-use crate::upstream::{Phase, RegionUpdate};
+use upstream_bindings::region::DbUpdate;
 
 const OVERWORLD_DIM: u32 = 1;
 
@@ -27,6 +30,7 @@ pub async fn handle(
         region_id,
         phase,
         update,
+        reducer,
     } = msg;
 
     // On the first Syncing update for this region (e.g. after a reconnect),
@@ -49,19 +53,24 @@ pub async fn handle(
     // accumulated snapshot, then switch to delta mode.
     if !region.is_live {
         region.is_live = true;
+        let timestamp_micros = event_timestamp_micros(&reducer);
         let res = region.snapshot_resources(region_id);
         let growth = region.snapshot_growth_timers(region_id);
         let enemy = region.snapshot_enemies(region_id);
         let play = region.snapshot_players(region_id);
         let player_states = region.snapshot_player_states(region_id);
+        let recipe_rows = region.snapshot_recipe_meta();
+        let crafts = region.snapshot_crafts(region_id, timestamp_micros);
         info!(
-            "initial snapshot ready — emitting bulk replace: region_id={} resources={} growth_timers={} enemies={} players={} player_states={}",
+            "initial snapshot ready — emitting bulk replace: region_id={} resources={} growth_timers={} enemies={} players={} player_states={} recipes={} crafts={}",
             region_id,
             res.len(),
             growth.len(),
             enemy.len(),
             play.len(),
             player_states.len(),
+            recipe_rows.len(),
+            crafts.len(),
         );
         send_relay(
             &sinks.relay_tx,
@@ -86,6 +95,11 @@ pub async fn handle(
                     region_id,
                     rows: player_states,
                 },
+                RelayMsg::ReplaceCrafts {
+                    region_id,
+                    recipe_rows,
+                    rows: crafts,
+                },
             ]
             .into_iter(),
         );
@@ -102,7 +116,7 @@ pub async fn handle(
     }
 
     // Normal delta mode: emit incremental upserts/deletes derived from this batch.
-    emit_deltas(region_id, &update, region, sinks);
+    emit_deltas(region_id, &update, &reducer, region, sinks);
     Ok(())
 }
 
@@ -117,6 +131,53 @@ fn update_join_maps(
     let live = region.is_live;
 
     if !live {
+        for e in &update.user_state.deletes {
+            region.user_identity_map.remove(&e.row.identity);
+        }
+        for e in &update.user_state.inserts {
+            region
+                .user_identity_map
+                .insert(e.row.identity, e.row.entity_id);
+        }
+        for e in &update.building_state.deletes {
+            region.building_claim_map.remove(&e.row.entity_id);
+        }
+        for e in &update.building_state.inserts {
+            region
+                .building_claim_map
+                .insert(e.row.entity_id, e.row.claim_entity_id);
+        }
+        for e in &update.crafting_recipe_desc.deletes {
+            region.recipe_map.remove(&e.row.id);
+        }
+        for e in &update.crafting_recipe_desc.inserts {
+            region
+                .recipe_map
+                .insert(e.row.id, e.row.clone());
+        }
+        for e in &update.public_progressive_action_state.deletes {
+            region.public_craft_ids.remove(&e.row.entity_id);
+        }
+        for e in &update.public_progressive_action_state.inserts {
+            region.public_craft_ids.insert(e.row.entity_id);
+        }
+        for e in &update.progressive_action_state.deletes {
+            region.progressive_crafts.remove(&e.row.entity_id);
+        }
+        for e in &update.progressive_action_state.inserts {
+            region.progressive_crafts.insert(
+                e.row.entity_id,
+                ProgressiveCraftState {
+                    entity_id: e.row.entity_id,
+                    building_entity_id: e.row.building_entity_id,
+                    progress: e.row.progress,
+                    recipe_id: e.row.recipe_id,
+                    craft_count: e.row.craft_count,
+                    owner_entity_id: e.row.owner_entity_id,
+                },
+            );
+        }
+
         // Resources: location_state for coordinates, resource_state for kind.
         for e in &update.resource_state.deletes {
             region.resource_kind.remove(&e.row.entity_id);
@@ -187,6 +248,23 @@ fn update_join_maps(
             );
         }
     } else {
+        for e in &update.user_state.deletes {
+            region.user_identity_map.remove(&e.row.identity);
+        }
+        for e in &update.user_state.inserts {
+            region
+                .user_identity_map
+                .insert(e.row.identity, e.row.entity_id);
+        }
+        for e in &update.building_state.deletes {
+            region.building_claim_map.remove(&e.row.entity_id);
+        }
+        for e in &update.building_state.inserts {
+            region
+                .building_claim_map
+                .insert(e.row.entity_id, e.row.claim_entity_id);
+        }
+
         // Live phase: only maintain player_entity_ids for history routing.
         for e in &update.player_username_state.inserts {
             region.player_entity_ids.insert(e.row.entity_id);
@@ -204,6 +282,7 @@ fn update_join_maps(
 fn emit_deltas(
     region_id: u8,
     update: &upstream_bindings::region::DbUpdate,
+    reducer: &upstream_bindings::sdk::Event<upstream_bindings::region::Reducer>,
     region: &super::join::RegionJoinState,
     sinks: &ProcessorHandle,
 ) {
@@ -218,7 +297,14 @@ fn emit_deltas(
     let mut player_online_ids: Vec<u64> = Vec::new();
     let mut player_offline_ids: Vec<u64> = Vec::new();
     let mut player_renames: Vec<crate::relay::PlayerRenameRow> = Vec::new();
+    let mut recipe_upserts: Vec<RecipeMetaRow> = Vec::new();
+    let mut recipe_deletes: Vec<i32> = Vec::new();
+    let mut craft_upserts: Vec<CraftUpdateRow> = Vec::new();
+    let mut craft_public_updates: Vec<CraftPublicUpdateRow> = Vec::new();
+    let mut craft_progress_deltas: Vec<CraftContributionDeltaRow> = Vec::new();
+    let mut craft_expiry_ids: Vec<u64> = Vec::new();
     let mut history_msgs: Vec<HistoryMsg> = Vec::new();
+    let update_timestamp_micros = event_timestamp_micros(reducer);
 
     // Resource deletes.
     for e in &update.resource_state.deletes {
@@ -390,6 +476,112 @@ fn emit_deltas(
         player_offline_ids.push(e.row.entity_id);
     }
 
+    // Recipe metadata mirroring.
+    for e in &update.crafting_recipe_desc.inserts {
+        recipe_upserts.push(RecipeMetaRow {
+            id: e.row.id,
+            effort_required: e.row.actions_required,
+            skill_id: e.row.level_requirements.iter().next().map(|r| r.skill_id).unwrap_or(0),
+            exp_per_progress: e.row.experience_per_progress.iter().next().map(|e| e.quantity).unwrap_or(0f32),
+            level_required: e.row.level_requirements.iter().next().map(|r| r.level).unwrap_or(0),
+        });
+    }
+    for e in &update.crafting_recipe_desc.deletes {
+        if !update
+            .crafting_recipe_desc
+            .inserts
+            .iter()
+            .any(|ins| ins.row.id == e.row.id)
+        {
+            recipe_deletes.push(e.row.id);
+        }
+    }
+
+    // Public toggles without a corresponding progressive_action_state change.
+    for e in &update.public_progressive_action_state.inserts {
+        let eid = e.row.entity_id;
+        let has_progressive_change = has_progressive_action_state_change(update, eid);
+        if !has_progressive_change {
+            craft_public_updates.push(CraftPublicUpdateRow {
+                craft_id: eid,
+                public: true,
+            });
+        }
+    }
+    for e in &update.public_progressive_action_state.deletes {
+        let eid = e.row.entity_id;
+        let has_progressive_change = has_progressive_action_state_change(update, eid);
+        if !has_progressive_change {
+            craft_public_updates.push(CraftPublicUpdateRow {
+                craft_id: eid,
+                public: false,
+            });
+        }
+    }
+
+    // Progressive action deltas drive craft lifecycle + contribution accounting.
+    let caller_player_id = match reducer {
+        upstream_bindings::sdk::Event::Reducer(ev) => {
+            region.user_identity_map.get(&ev.caller_identity).copied()
+        }
+        _ => None,
+    };
+    for e in &update.progressive_action_state.inserts {
+        let craft_id = e.row.entity_id;
+        if let Some(prev) = update
+            .progressive_action_state
+            .deletes
+            .iter()
+            .find(|del| del.row.entity_id == craft_id)
+        {
+            let delta = e.row.progress - prev.row.progress;
+            if delta != 0
+                && let Some(player_id) = caller_player_id
+            {
+                craft_progress_deltas.push(CraftContributionDeltaRow {
+                    craft_id,
+                    player_id,
+                    progress_delta: delta,
+                    progress_total: e.row.progress,
+                    last_seen_micros: update_timestamp_micros,
+                });
+            }
+        } else {
+            let public = update
+                .public_progressive_action_state
+                .inserts
+                .iter()
+                .any(|pub_row| pub_row.row.entity_id == craft_id);
+            craft_upserts.push(CraftUpdateRow {
+                entity_id: craft_id,
+                owner_entity_id: e.row.owner_entity_id,
+                claim_entity_id: region
+                    .building_claim_map
+                    .get(&e.row.building_entity_id)
+                    .copied()
+                    .unwrap_or(0),
+                building_entity_id: e.row.building_entity_id,
+                first_seen_micros: update_timestamp_micros,
+                recipe_id: e.row.recipe_id,
+                count: e.row.craft_count,
+                region_id,
+                public,
+                progress: e.row.progress,
+                last_seen_micros: update_timestamp_micros,
+            });
+        }
+    }
+    for e in &update.progressive_action_state.deletes {
+        if !update
+            .progressive_action_state
+            .inserts
+            .iter()
+            .any(|ins| ins.row.entity_id == e.row.entity_id)
+        {
+            craft_expiry_ids.push(e.row.entity_id);
+        }
+    }
+
     send_relay(
         &sinks.relay_tx,
         resource_deletes.into_iter().map(RelayMsg::DeleteResource),
@@ -446,6 +638,42 @@ fn emit_deltas(
             std::iter::once(RelayMsg::RenamePlayers(player_renames)),
         );
     }
+    if !recipe_upserts.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::UpsertRecipeMeta(recipe_upserts)),
+        );
+    }
+    if !recipe_deletes.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::DeleteRecipeMeta(recipe_deletes)),
+        );
+    }
+    if !craft_upserts.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::UpsertCrafts(craft_upserts)),
+        );
+    }
+    if !craft_public_updates.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::ToggleCraftPublic(craft_public_updates)),
+        );
+    }
+    if !craft_progress_deltas.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::ApplyCraftProgressDeltas(craft_progress_deltas)),
+        );
+    }
+    if !craft_expiry_ids.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::ScheduleCraftExpiry(craft_expiry_ids)),
+        );
+    }
     for msg in history_msgs {
         if let Some(tx) = &sinks.history_tx
             && let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = tx.try_send(msg)
@@ -453,6 +681,19 @@ fn emit_deltas(
             warn!("history channel full — dropping player location sample");
         }
     }
+}
+
+fn has_progressive_action_state_change(update: &DbUpdate, eid: u64) -> bool {
+    update
+        .progressive_action_state
+        .inserts
+        .iter()
+        .any(|ins| ins.row.entity_id == eid)
+        || update
+            .progressive_action_state
+            .deletes
+            .iter()
+            .any(|del| del.row.entity_id == eid)
 }
 
 fn send_relay(tx: &tokio::sync::mpsc::Sender<RelayMsg>, msgs: impl Iterator<Item = RelayMsg>) {
@@ -464,5 +705,17 @@ fn send_relay(tx: &tokio::sync::mpsc::Sender<RelayMsg>, msgs: impl Iterator<Item
     }
     if dropped > 0 {
         debug!("relay channel full — dropped {} messages", dropped);
+    }
+}
+
+fn event_timestamp_micros(
+    reducer: &upstream_bindings::sdk::Event<upstream_bindings::region::Reducer>,
+) -> i64 {
+    match reducer {
+        upstream_bindings::sdk::Event::Reducer(ev) => ev.timestamp.to_micros_since_unix_epoch(),
+        _ => std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_micros() as i64)
+            .unwrap_or(0),
     }
 }

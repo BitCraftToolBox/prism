@@ -62,14 +62,17 @@ pub fn insert_growth_timers(
             // we'll get a new growth state for a resource that already had one. otherwise, we expect
             // each new growth state to correspond to a new resource without a growth state.
             // we use insert_or_update here to guard against a panic that would discard the whole tx.
-            ctx.db.growth_timers().entity_id().insert_or_update(GrowthTimer {
-                entity_id: timer.entity_id,
-                resource_id: res.resource_id,
-                end_timestamp: timer.end_timestamp,
-                x: res.x,
-                z: res.z,
-                region_id: res.region_id
-            });
+            ctx.db
+                .growth_timers()
+                .entity_id()
+                .insert_or_update(GrowthTimer {
+                    entity_id: timer.entity_id,
+                    resource_id: res.resource_id,
+                    end_timestamp: timer.end_timestamp,
+                    x: res.x,
+                    z: res.z,
+                    region_id: res.region_id,
+                });
         }
         // it's also possible that we get a growth state for a resource entity we're not tracking
         // this generally means the resource was in a non-overworld dimension (mines, dungeons)
