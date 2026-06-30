@@ -2,6 +2,61 @@ use spacetimedb::Table;
 use spacetimedb::http::{Body, HandlerContext, Request, Response, Router};
 
 use crate::tables::players::player_state;
+use crate::tables::resources::growth_timers;
+
+#[spacetimedb::http::handler]
+fn timers(ctx: &mut HandlerContext, request: Request) -> Response {
+    let url = url::Url::parse(request.uri().to_string().as_str());
+    let params: std::collections::HashMap<String, String> = url
+        .ok()
+        .map(|u| u.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect())
+        .unwrap_or_default();
+
+    let Some(resource_param) = params.get("resource") else {
+        return Response::builder()
+            .status(400)
+            .header("Content-Type", "application/json")
+            .body(Body::from_bytes(b"{\"error\":\"resource param is required\"}".to_vec()))
+            .unwrap();
+    };
+
+    let resource_ids: Vec<i32> = resource_param
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+
+    let region_ids: Option<Vec<u8>> = params.get("region").map(|r| {
+        r.split(',').filter_map(|s| s.trim().parse().ok()).collect()
+    });
+
+    let rows = ctx.with_tx(|tx| {
+        tx.db
+            .growth_timers()
+            .iter()
+            .filter(|t| {
+                resource_ids.contains(&t.resource_id)
+                    && region_ids.as_ref().map_or(true, |rs| rs.contains(&t.region_id))
+            })
+            .map(|t| {
+                serde_json::json!({
+                    "entityId": t.entity_id.to_string(),
+                    "resourceId": t.resource_id,
+                    "regionId": t.region_id,
+                    "x": t.x,
+                    "z": t.z,
+                    "endTimestamp": t.end_timestamp.to_rfc3339().unwrap_or_else(|_| "time overflowed".to_string()),
+                })
+            })
+            .collect::<Vec<_>>()
+    });
+
+    let body = serde_json::to_vec(&rows).unwrap_or_default();
+    Response::builder()
+        .status(200)
+        .header("Content-Type", "application/json")
+        .body(Body::from_bytes(body))
+        .unwrap()
+}
 
 #[spacetimedb::http::handler]
 fn players(ctx: &mut HandlerContext, request: Request) -> Response {
@@ -80,5 +135,5 @@ fn players(ctx: &mut HandlerContext, request: Request) -> Response {
 
 #[spacetimedb::http::router]
 fn router() -> Router {
-    Router::new().get("/players", players)
+    Router::new().get("/players", players).get("/timers", timers)
 }
