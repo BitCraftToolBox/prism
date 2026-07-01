@@ -141,7 +141,6 @@ pub fn schedule_craft_expiry(ctx: &ReducerContext, craft_ids: Vec<u64>) -> Resul
 
 #[reducer]
 fn remove_craft(ctx: &ReducerContext, expiring_craft: ExpiringCraft) -> Result<(), String> {
-    ensure_relay(ctx)?;
     let craft_id = expiring_craft.craft_id;
     ctx.db.craft_meta().entity_id().delete(craft_id);
     ctx.db.craft_progress().entity_id().delete(craft_id);
