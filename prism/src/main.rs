@@ -31,6 +31,15 @@ async fn main() -> Result<()> {
         config.relay.as_ref().map_or("none", |r| r.module.as_str()),
     );
 
+    if let Some(m) = &config.metrics {
+        metrics_exporter_prometheus::PrometheusBuilder::new()
+            .add_global_label("node", m.node.clone())
+            .with_http_listener(([0, 0, 0, 0], m.port))
+            .install()
+            .expect("metrics recorder");
+        info!("metrics: listening on :{}", m.port);
+    }
+
     let shutdown = shutdown::Shutdown::new();
     shutdown::install_ctrl_c(shutdown.clone());
 

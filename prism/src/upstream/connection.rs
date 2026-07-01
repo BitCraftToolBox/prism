@@ -10,6 +10,7 @@ use anyhow::Result;
 use chrono::Utc;
 use cron::Schedule;
 use log::{debug, error, info, warn};
+use metrics::{counter, histogram};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::{Sender, UnboundedSender, unbounded_channel};
 use upstream_bindings::ext::ctx::RunUntil;
@@ -86,6 +87,7 @@ pub async fn run_region(
         // Per-connection phase shared between the connection task and the
         // channel-drain task.
         let phase: SharedPhase = Arc::new(AtomicU8::new(Phase::Syncing as u8));
+        let connect_start = std::time::Instant::now();
 
         // The cacheless update channel is private to one connection — we
         // drain it from a helper task that re-emits tagged updates.
@@ -93,8 +95,11 @@ pub async fn run_region(
         let drain_phase = phase.clone();
         let drain_tx = proc_tx.clone();
         let drain_region = region.id;
+        let region_label = region.name.clone();
         let drain = tokio::spawn(async move {
+            let label = region_label.as_str().to_owned();
             while let Some(update) = cache_rx.recv().await {
+                counter!("prism_upstream_messages_total", "region" => label.clone()).increment(1);
                 let _ = drain_tx.send(RegionUpdate {
                     region_id: drain_region,
                     phase: load_phase(&drain_phase),
@@ -127,12 +132,18 @@ pub async fn run_region(
                 );
                 let phase = phase_for_connect.clone();
                 let region_name = region_name_for_log.clone();
+                let region_label_for_live = region_name_for_log.clone();
                 queue_subscribe(
                     ctx,
                     &region_name_for_log,
                     pipelines_for_connect.clone(),
                     move || {
                         info!("[{}] all pipelines live", region_name);
+                        histogram!(
+                            "prism_initial_sync_duration_seconds",
+                            "region" => region_label_for_live.clone()
+                        )
+                        .record(connect_start.elapsed().as_secs_f64());
                         store_phase(&phase, Phase::Live);
                     },
                 );
@@ -187,6 +198,7 @@ pub async fn run_region(
                 (reconnect_backoff_idx + 1).min(RECONNECT_BACKOFF_STEPS.len() - 1);
         }
 
+        counter!("prism_reconnect_total", "region" => region.name.clone()).increment(1);
         warn!("[{}] reconnecting in {:?}", region.name, reconnect_backoff);
         // Wait the backoff but bail early on shutdown.
         let Some(signal) = shutdown.lock().await.register() else {

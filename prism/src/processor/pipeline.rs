@@ -492,22 +492,19 @@ fn emit_deltas(
             skill_id: e
                 .row
                 .level_requirements
-                .iter()
-                .next()
+                .first()
                 .map(|r| r.skill_id)
                 .unwrap_or(0),
             exp_per_progress: e
                 .row
                 .experience_per_progress
-                .iter()
-                .next()
+                .first()
                 .map(|e| e.quantity)
                 .unwrap_or(0f32),
             level_required: e
                 .row
                 .level_requirements
-                .iter()
-                .next()
+                .first()
                 .map(|r| r.level)
                 .unwrap_or(0),
         });

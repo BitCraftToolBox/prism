@@ -27,3 +27,7 @@ env_logger = "0.11"
 
 # History sink.
 sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "macros", "migrate"] }
+
+# Metrics.
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }

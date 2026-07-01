@@ -17,6 +17,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use cron::Schedule;
 use log::{error, info, warn};
+use metrics::{counter, histogram};
 use tokio::sync::broadcast;
 
 #[cfg(unix)]
@@ -169,6 +170,7 @@ async fn run_task(
         );
         let cfg = config.clone();
         let tmp = temp_tiles_dir.clone();
+        let task_start = std::time::Instant::now();
         let result =
             tokio::task::spawn_blocking(move || run_renderer(renderer, &cfg, &tmp, &cancel)).await;
 
@@ -177,16 +179,24 @@ async fn run_task(
         // shutdown state here to decide whether to commit or discard.
         let is_shutdown = shutdown.lock().await.is_triggered();
 
+        let task_elapsed = task_start.elapsed().as_secs_f64();
+        let renderer_label = renderer.to_string();
         match result {
             Ok(Ok(())) if !is_shutdown => {
                 // Clean finish, no shutdown — commit atomically.
                 match commit(&temp_tiles_dir, &real_tiles_dir) {
                     Ok(()) => {
                         info!("[scheduler] {} done, output committed", renderer);
+                        histogram!("cartographer_task_duration_seconds", "task" => renderer_label.clone())
+                            .record(task_elapsed);
+                        counter!("cartographer_task_total", "task" => renderer_label, "status" => "success")
+                            .increment(1);
                         run_on_complete(&config, &real_tiles_dir, renderer).await;
                     }
                     Err(e) => {
                         error!("[scheduler] {} commit failed: {:#}", renderer, e);
+                        counter!("cartographer_task_total", "task" => renderer_label, "status" => "commit_failed")
+                            .increment(1);
                         let _ = std::fs::remove_dir_all(&temp_tiles_dir);
                     }
                 }
@@ -208,10 +218,14 @@ async fn run_task(
             }
             Ok(Err(e)) => {
                 error!("[scheduler] {} failed: {:#}", renderer, e);
+                counter!("cartographer_task_total", "task" => renderer_label, "status" => "failed")
+                    .increment(1);
                 let _ = std::fs::remove_dir_all(&temp_tiles_dir);
             }
             Err(e) => {
                 error!("[scheduler] {} task panicked: {:?}", renderer, e);
+                counter!("cartographer_task_total", "task" => renderer_label, "status" => "panicked")
+                    .increment(1);
                 let _ = std::fs::remove_dir_all(&temp_tiles_dir);
             }
         }

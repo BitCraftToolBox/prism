@@ -10,6 +10,7 @@ use std::time::Duration;
 use anyhow::Result;
 use hashbrown::HashMap;
 use log::{debug, error, info, warn};
+use metrics::{counter, histogram};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use tokio::sync::mpsc::Receiver;
@@ -185,6 +186,8 @@ async fn flush_player_locations(pool: &PgPool, buffer: &mut Vec<PlayerLocationRo
         "history flush: inserting player_locations count={}",
         rows.len()
     );
+    counter!("prism_history_rows_total", "op" => "player_locations").increment(rows.len() as u64);
+    let t = std::time::Instant::now();
 
     // Collect column arrays for unnest bulk insert.
     // Casting u64 → i64 is safe: game entity IDs and timestamps (ms since epoch)
@@ -209,6 +212,8 @@ async fn flush_player_locations(pool: &PgPool, buffer: &mut Vec<PlayerLocationRo
     {
         warn!("history: batch insert failed: {e:?}");
     }
+    histogram!("prism_history_flush_duration_seconds", "op" => "player_locations")
+        .record(t.elapsed().as_secs_f64());
 }
 
 async fn upsert_crafts(
@@ -220,6 +225,8 @@ async fn upsert_crafts(
         return;
     }
     debug!("history flush: upserting crafts count={}", rows.len());
+    counter!("prism_history_rows_total", "op" => "craft_upsert").increment(rows.len() as u64);
+    let t = std::time::Instant::now();
 
     let entity_ids: Vec<i64> = rows.iter().map(|r| r.entity_id as i64).collect();
     let owner_ids: Vec<i64> = rows.iter().map(|r| r.owner_entity_id as i64).collect();
@@ -353,6 +360,8 @@ async fn upsert_crafts(
     {
         warn!("history: craft upsert failed: {e:?}");
     }
+    histogram!("prism_history_flush_duration_seconds", "op" => "craft_upsert")
+        .record(t.elapsed().as_secs_f64());
 }
 
 async fn update_craft_public(pool: &PgPool, rows: &[CraftPublicUpdateRow]) {
@@ -386,6 +395,8 @@ async fn apply_craft_progress_deltas(pool: &PgPool, rows: &[CraftContributionDel
     if rows.is_empty() {
         return;
     }
+    counter!("prism_history_rows_total", "op" => "craft_progress").increment(rows.len() as u64);
+    let t = std::time::Instant::now();
 
     let craft_ids: Vec<i64> = rows.iter().map(|r| r.craft_id as i64).collect();
     let player_ids: Vec<i64> = rows.iter().map(|r| r.player_id as i64).collect();
@@ -426,4 +437,6 @@ async fn apply_craft_progress_deltas(pool: &PgPool, rows: &[CraftContributionDel
     {
         warn!("history: craft progress update failed: {e:?}");
     }
+    histogram!("prism_history_flush_duration_seconds", "op" => "craft_progress")
+        .record(t.elapsed().as_secs_f64());
 }

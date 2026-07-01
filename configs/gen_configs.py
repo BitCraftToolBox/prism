@@ -34,7 +34,10 @@ for (group, name), regions in region_groups.items():
     compose_output += compose_service.replace("$GROUP$", str(group)).replace("$NAME$", "prism-" + (name or str(group)))
 
     outfile = f"prism-{group}.toml"
-    output = before.replace("$OFFSET$", str(offset1)).replace("$OFFSET2$", str(offset2))
+    output = (before
+              .replace("$OFFSET$", str(offset1))
+              .replace("$OFFSET2$", str(offset2))
+              .replace("$NAME$", "prism-" + name))
     for region in regions:
         output += "\n[[upstream.regions]]\n"\
                   f"name = \"bitcraft-live-{region}\"\n"\
@@ -54,6 +57,10 @@ m_h = """\
 host = "https://bitcraft-early-access.spacetimedb.com"
 """
 m_p = """
+[metrics]
+port = 9090
+node = "prism-mapper"
+
 [pipelines]
 resources = false
 enemies = false
@@ -106,6 +113,10 @@ c_h = """\
 host = "https://bitcraft-early-access.spacetimedb.com"
 """
 c_b = """
+[metrics]
+port = 9090
+node = "prism-craftmon"
+
 [relay]
 uri = "ws://spacetimedb:3000"
 module = "prism-relay"

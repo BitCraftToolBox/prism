@@ -2,6 +2,10 @@ input_dir = "/data/"
 output_dir = "/data/"
 run_on_complete = "/app/upload_tiles.sh {} {root}"
 
+[metrics]
+port = 9090
+node = "cartographer"
+
 [[tasks]]
 renderer = "terrain"
 # daily, offset ~5 min from the terrain dump tasks

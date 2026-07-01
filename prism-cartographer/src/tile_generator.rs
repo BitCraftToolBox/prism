@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use fast_image_resize as fir;
 use image::{ImageBuffer, Rgba, RgbaImage};
+use metrics::{gauge, histogram};
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -76,14 +77,18 @@ pub fn generate_tiles(
             proj_h
         );
 
+        let zoom_label = crs_zoom.to_string();
+        let resize_start = std::time::Instant::now();
         let resized = match scaling {
             TileScaling::Nearest => nn_downscale(img, img_w, img_h, proj_w, proj_h),
             TileScaling::Lanczos3 => lanczos3_downscale(img, proj_w, proj_h)?,
         };
+        histogram!("cartographer_resize_duration_seconds", "zoom" => zoom_label.clone())
+            .record(resize_start.elapsed().as_secs_f64());
 
-        log::info!("resized");
-
+        let encode_start = std::time::Instant::now();
         let mut count = 0u32;
+        let mut zoom_bytes: u64 = 0;
         for tx in range.x_min..=range.x_max {
             check_canceled(canceled)?;
 
@@ -109,9 +114,14 @@ pub fn generate_tiles(
 
                 let path = col_dir.join(format!("{}.webp", ty));
                 encode_webp_lossless(&tile, &path)?;
+                zoom_bytes += path.metadata().map(|m| m.len()).unwrap_or(0);
                 count += 1;
             }
         }
+        histogram!("cartographer_tile_encode_duration_seconds", "zoom" => zoom_label.clone())
+            .record(encode_start.elapsed().as_secs_f64());
+        gauge!("cartographer_tile_count", "zoom" => zoom_label.clone()).set(count as f64);
+        gauge!("cartographer_tile_bytes_total", "zoom" => zoom_label).set(zoom_bytes as f64);
 
         total += count;
         log::info!("[tiles] zoom {} → {} tiles", crs_zoom, count);

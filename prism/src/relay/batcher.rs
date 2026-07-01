@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use log::{debug, error, info, warn};
+use metrics::{counter, gauge, histogram};
 use relay_bindings::{
     CraftContributionDelta, CraftPublicUpdate, CraftUpdate, EnemyLocation, GrowthTimerUpdate,
     MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate, PlayerState, RecipeMeta,
@@ -201,6 +202,7 @@ async fn ensure_connected(
         return true;
     }
     warn!("relay batcher: connection lost, reconnecting...");
+    counter!("prism_relay_reconnect_total").increment(1);
     match connect_with_retry(relay, shutdown).await {
         Some(new_conn) => {
             let old = std::mem::replace(conn, new_conn);
@@ -424,6 +426,9 @@ pub async fn run(
 
             _ = player_tick.tick() => {
                 if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
+                gauge!("prism_relay_batch_depth", "pipeline" => "player")
+                    .set(batches.player_upserts.len() as f64 + batches.player_state_upserts.len() as f64);
+                let t = std::time::Instant::now();
                 flush_player_batch(&conn, &mut batches);
                 flush_player_state_batch(&conn, &mut batches);
                 flush_mobile_moves(&conn, &mut batches);
@@ -431,15 +436,27 @@ pub async fn run(
                 flush_player_offline(&conn, &mut batches);
                 flush_player_renames(&conn, &mut batches);
                 flush_craft_batch(&conn, &mut batches);
+                histogram!("prism_relay_flush_duration_seconds", "pipeline" => "player")
+                    .record(t.elapsed().as_secs_f64());
             }
             _ = enemy_tick.tick() => {
                 if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
+                gauge!("prism_relay_batch_depth", "pipeline" => "enemy")
+                    .set(batches.enemy_inserts.len() as f64);
+                let t = std::time::Instant::now();
                 flush_enemy_batch(&conn, &mut batches);
+                histogram!("prism_relay_flush_duration_seconds", "pipeline" => "enemy")
+                    .record(t.elapsed().as_secs_f64());
             }
             _ = resource_tick.tick() => {
                 if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
+                gauge!("prism_relay_batch_depth", "pipeline" => "resource")
+                    .set(batches.resource_inserts.len() as f64);
+                let t = std::time::Instant::now();
                 flush_resource_batch(&conn, &mut batches);
                 flush_growth_batch(&conn, &mut batches);
+                histogram!("prism_relay_flush_duration_seconds", "pipeline" => "resource")
+                    .record(t.elapsed().as_secs_f64());
             }
         }
     }
@@ -499,6 +516,8 @@ fn flush_resource_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.resource_inserts.is_empty() {
         let rows = std::mem::take(&mut batches.resource_inserts);
         debug!("relay flush: insert_resources count={}", rows.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "resource", "op" => "insert")
+            .increment(rows.len() as u64);
         if let Err(e) = conn.insert_resources(rows) {
             warn!("relay: insert_resources: {e:?}");
         }
@@ -506,6 +525,8 @@ fn flush_resource_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.resource_deletes.is_empty() {
         let ids = std::mem::take(&mut batches.resource_deletes);
         debug!("relay flush: delete_resources count={}", ids.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "resource", "op" => "delete")
+            .increment(ids.len() as u64);
         if let Err(e) = conn.delete_resources(ids) {
             warn!("relay: delete_resources: {e:?}");
         }
@@ -526,6 +547,8 @@ fn flush_enemy_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.enemy_inserts.is_empty() {
         let rows = std::mem::take(&mut batches.enemy_inserts);
         debug!("relay flush: insert_enemies count={}", rows.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "enemy", "op" => "insert")
+            .increment(rows.len() as u64);
         if let Err(e) = conn.insert_enemies(rows) {
             warn!("relay: insert_enemies: {e:?}");
         }
@@ -533,6 +556,8 @@ fn flush_enemy_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.enemy_deletes.is_empty() {
         let ids = std::mem::take(&mut batches.enemy_deletes);
         debug!("relay flush: delete_enemies count={}", ids.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "enemy", "op" => "delete")
+            .increment(ids.len() as u64);
         if let Err(e) = conn.delete_enemies(ids) {
             warn!("relay: delete_enemies: {e:?}");
         }
@@ -543,6 +568,8 @@ fn flush_player_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.player_upserts.is_empty() {
         let rows = std::mem::take(&mut batches.player_upserts);
         debug!("relay flush: upsert_players count={}", rows.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "player", "op" => "upsert")
+            .increment(rows.len() as u64);
         if let Err(e) = conn.upsert_players(rows) {
             warn!("relay: upsert_players: {e:?}");
         }
@@ -550,6 +577,8 @@ fn flush_player_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.player_deletes.is_empty() {
         let ids = std::mem::take(&mut batches.player_deletes);
         debug!("relay flush: delete_players count={}", ids.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "player", "op" => "delete")
+            .increment(ids.len() as u64);
         if let Err(e) = conn.delete_players(ids) {
             warn!("relay: delete_players: {e:?}");
         }

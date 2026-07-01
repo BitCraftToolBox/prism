@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use log::{debug, warn};
+use metrics::histogram;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, channel};
 
 use crate::config::Config;
@@ -67,9 +68,11 @@ pub async fn run(
 ) -> Result<()> {
     let mut state = JoinState::new();
     while let Some(msg) = rx.recv().await {
+        let t = std::time::Instant::now();
         if let Err(e) = pipeline::handle(&mut state, msg, &handle).await {
             warn!("processor error: {e:?}");
         }
+        histogram!("prism_processor_latency_seconds").record(t.elapsed().as_secs_f64());
     }
     debug!("processor exiting (upstream channel closed)");
     Ok(())

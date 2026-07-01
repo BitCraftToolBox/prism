@@ -41,6 +41,14 @@ fn main() -> Result<()> {
         .context("Failed to build Tokio runtime")?;
 
     rt.block_on(async {
+        if let Some(m) = &config.metrics {
+            metrics_exporter_prometheus::PrometheusBuilder::new()
+                .add_global_label("node", m.node.clone())
+                .with_http_listener(([0, 0, 0, 0], m.port))
+                .install()
+                .expect("metrics recorder");
+            log::info!("[cartographer] metrics: listening on :{}", m.port);
+        }
         let sd = shutdown::Shutdown::new();
         shutdown::install_ctrl_c(sd.clone());
         scheduler::run(Arc::new(config), sd).await

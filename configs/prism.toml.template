@@ -16,6 +16,10 @@ tables = [
     { name = "location_state", output_file = "timer_locations", query = "SELECT loc.* FROM growth_state gs JOIN location_state loc ON gs.entity_id = loc.entity_id;" },
 ]
 $REGIONS$
+[metrics]
+port = 9090
+node = "$NAME$"
+
 [relay]
 uri = "ws://spacetimedb:3000"
 module = "prism-relay"

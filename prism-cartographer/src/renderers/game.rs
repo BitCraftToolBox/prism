@@ -6,6 +6,7 @@
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use image::{ImageBuffer, Rgb, Rgba};
+use metrics::{gauge, histogram};
 use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
@@ -110,11 +111,14 @@ pub fn render(tiles_dir: &Path, canceled: &AtomicBool) -> Result<()> {
 fn download_gwm(name: &str) -> Result<Vec<u8>> {
     let url = format!("{}/{}.gwm", URL_ROOT, name);
     log::info!("[game] downloading {}", url);
+    let dl_start = std::time::Instant::now();
     let compressed = reqwest::blocking::get(&url)
         .with_context(|| format!("Failed to fetch {}", url))?
         .bytes()
         .with_context(|| format!("Failed to read response from {}", url))?;
 
+    histogram!("cartographer_download_duration_seconds").record(dl_start.elapsed().as_secs_f64());
+    gauge!("cartographer_download_bytes").set(compressed.len() as f64);
     log::info!(
         "[game] downloaded {} bytes (compressed), decompressing...",
         compressed.len()

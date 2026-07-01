@@ -1,6 +1,9 @@
 import cron, {ScheduledTask} from 'node-cron';
 
 import {main} from "./src/main";
+import {startMetricsServer} from "./src/metrics";
+
+startMetricsServer(9090);
 
 let args: string[] = process.argv.slice(2);
 

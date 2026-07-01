@@ -18,6 +18,8 @@ pub struct Config {
     pub pipelines: PipelinesConfig,
     #[serde(default)]
     pub dumper: DumperConfig,
+    #[serde(default)]
+    pub metrics: Option<MetricsConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -138,6 +140,14 @@ impl Default for DumperConfig {
             output_dir: default_dump_dir(),
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MetricsConfig {
+    /// Port for the Prometheus /metrics HTTP endpoint.
+    pub port: u16,
+    /// Value of the `node` label attached to every metric.
+    pub node: String,
 }
 
 fn default_true() -> bool {

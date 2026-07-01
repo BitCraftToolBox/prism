@@ -25,6 +25,9 @@ pub struct Config {
     /// path of the committed output directory before the command is executed
     /// via `sh -c`.  If no `{}` is present the command is run as-is.
     pub run_on_complete: Option<String>,
+
+    #[serde(default)]
+    pub metrics: Option<MetricsConfig>,
 }
 
 fn default_region_prefix() -> String {
@@ -58,4 +61,10 @@ impl std::fmt::Display for RendererKind {
             RendererKind::Roads => write!(f, "roads"),
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MetricsConfig {
+    pub port: u16,
+    pub node: String,
 }
