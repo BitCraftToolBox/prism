@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use image::{ImageBuffer, Rgb, Rgba};
-use metrics::{gauge, histogram};
+use metrics::gauge;
 use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
@@ -117,7 +117,7 @@ fn download_gwm(name: &str) -> Result<Vec<u8>> {
         .bytes()
         .with_context(|| format!("Failed to read response from {}", url))?;
 
-    histogram!("cartographer_download_duration_seconds").record(dl_start.elapsed().as_secs_f64());
+    gauge!("cartographer_download_last_duration_seconds").set(dl_start.elapsed().as_secs_f64());
     gauge!("cartographer_download_bytes").set(compressed.len() as f64);
     log::info!(
         "[game] downloaded {} bytes (compressed), decompressing...",

@@ -10,7 +10,7 @@ use anyhow::Result;
 use chrono::Utc;
 use cron::Schedule;
 use log::{debug, error, info, warn};
-use metrics::{counter, histogram};
+use metrics::{counter, gauge};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::{Sender, UnboundedSender, unbounded_channel};
 use upstream_bindings::ext::ctx::RunUntil;
@@ -139,11 +139,11 @@ pub async fn run_region(
                     pipelines_for_connect.clone(),
                     move || {
                         info!("[{}] all pipelines live", region_name);
-                        histogram!(
-                            "prism_initial_sync_duration_seconds",
+                        gauge!(
+                            "prism_initial_sync_last_duration_seconds",
                             "region" => region_label_for_live.clone()
                         )
-                        .record(connect_start.elapsed().as_secs_f64());
+                        .set(connect_start.elapsed().as_secs_f64());
                         store_phase(&phase, Phase::Live);
                     },
                 );

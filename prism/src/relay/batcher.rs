@@ -746,6 +746,8 @@ fn flush_craft_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.craft_upserts.is_empty() {
         let rows = std::mem::take(&mut batches.craft_upserts);
         debug!("relay flush: upsert_crafts count={}", rows.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "craft", "op" => "upsert")
+            .increment(rows.len() as u64);
         if let Err(e) = conn.upsert_crafts(rows) {
             warn!("relay: upsert_crafts: {e:?}");
         }
@@ -753,6 +755,8 @@ fn flush_craft_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.craft_public_updates.is_empty() {
         let rows = std::mem::take(&mut batches.craft_public_updates);
         debug!("relay flush: toggle_public count={}", rows.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "craft", "op" => "public")
+            .increment(rows.len() as u64);
         if let Err(e) = conn.toggle_public(rows) {
             warn!("relay: toggle_public: {e:?}");
         }
@@ -763,6 +767,8 @@ fn flush_craft_batch(conn: &RelayConnection, batches: &mut Batches) {
             "relay flush: apply_craft_progress_deltas count={}",
             rows.len()
         );
+        counter!("prism_relay_flush_rows_total", "pipeline" => "craft", "op" => "progress")
+            .increment(rows.len() as u64);
         if let Err(e) = conn.apply_craft_progress_deltas(rows) {
             warn!("relay: apply_craft_progress_deltas: {e:?}");
         }
@@ -784,6 +790,8 @@ fn flush_claim_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.claim_info_upserts.is_empty() {
         let rows = std::mem::take(&mut batches.claim_info_upserts);
         debug!("relay flush: upsert_claim_info count={}", rows.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "claim", "op" => "info")
+            .increment(rows.len() as u64);
         if let Err(e) = conn.upsert_claim_info(rows) {
             warn!("relay: upsert_claim_info: {e:?}");
         }
@@ -791,6 +799,8 @@ fn flush_claim_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.claim_supply_upserts.is_empty() {
         let rows = std::mem::take(&mut batches.claim_supply_upserts);
         debug!("relay flush: upsert_claim_supply count={}", rows.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "claim", "op" => "supply")
+            .increment(rows.len() as u64);
         if let Err(e) = conn.upsert_claim_supply(rows) {
             warn!("relay: upsert_claim_supply: {e:?}");
         }
@@ -798,6 +808,8 @@ fn flush_claim_batch(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.claim_deletes.is_empty() {
         let ids = std::mem::take(&mut batches.claim_deletes);
         debug!("relay flush: delete_claims count={}", ids.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "claim", "op" => "delete")
+            .increment(ids.len() as u64);
         if let Err(e) = conn.delete_claims(ids) {
             warn!("relay: delete_claims: {e:?}");
         }

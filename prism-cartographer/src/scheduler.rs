@@ -17,7 +17,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use cron::Schedule;
 use log::{error, info, warn};
-use metrics::{counter, histogram};
+use metrics::{counter, gauge};
 use tokio::sync::broadcast;
 
 #[cfg(unix)]
@@ -187,14 +187,18 @@ async fn run_task(
                 match commit(&temp_tiles_dir, &real_tiles_dir) {
                     Ok(()) => {
                         info!("[scheduler] {} done, output committed", renderer);
-                        histogram!("cartographer_task_duration_seconds", "task" => renderer_label.clone())
-                            .record(task_elapsed);
+                        gauge!("cartographer_task_last_duration_seconds", "task" => renderer_label.clone())
+                            .set(task_elapsed);
+                        gauge!("cartographer_task_last_success", "task" => renderer_label.clone())
+                            .set(1.0);
                         counter!("cartographer_task_total", "task" => renderer_label, "status" => "success")
                             .increment(1);
                         run_on_complete(&config, &real_tiles_dir, renderer).await;
                     }
                     Err(e) => {
                         error!("[scheduler] {} commit failed: {:#}", renderer, e);
+                        gauge!("cartographer_task_last_success", "task" => renderer_label.clone())
+                            .set(0.0);
                         counter!("cartographer_task_total", "task" => renderer_label, "status" => "commit_failed")
                             .increment(1);
                         let _ = std::fs::remove_dir_all(&temp_tiles_dir);
@@ -218,12 +222,16 @@ async fn run_task(
             }
             Ok(Err(e)) => {
                 error!("[scheduler] {} failed: {:#}", renderer, e);
+                gauge!("cartographer_task_last_success", "task" => renderer_label.clone())
+                    .set(0.0);
                 counter!("cartographer_task_total", "task" => renderer_label, "status" => "failed")
                     .increment(1);
                 let _ = std::fs::remove_dir_all(&temp_tiles_dir);
             }
             Err(e) => {
                 error!("[scheduler] {} task panicked: {:?}", renderer, e);
+                gauge!("cartographer_task_last_success", "task" => renderer_label.clone())
+                    .set(0.0);
                 counter!("cartographer_task_total", "task" => renderer_label, "status" => "panicked")
                     .increment(1);
                 let _ = std::fs::remove_dir_all(&temp_tiles_dir);
