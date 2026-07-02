@@ -8,15 +8,16 @@
 //! covering everything accumulated so far.
 
 use super::ProcessorHandle;
-use super::join::{EntityLocation, JoinState, ProgressiveCraftState};
+use super::join::{ClaimLocalData, EntityLocation, JoinState, ProgressiveCraftState};
 use crate::history::HistoryMsg;
 use crate::relay::{
-    CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow,
-    PlayerRow, PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow,
+    ClaimInfoRow, ClaimSupplyRow, CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow,
+    EnemyRow, GrowthTimerRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow,
 };
 use crate::upstream::{Phase, RegionUpdate};
 use anyhow::Result;
 use log::{debug, info};
+use std::collections::HashSet;
 use upstream_bindings::region::DbUpdate;
 
 const OVERWORLD_DIM: u32 = 1;
@@ -61,10 +62,13 @@ pub async fn handle(
         let player_states = region.snapshot_player_states(region_id);
         let recipe_rows = region.snapshot_recipe_meta();
         let crafts = region.snapshot_crafts(region_id, timestamp_micros);
+        let claim_meta = region.snapshot_claim_meta(region_id);
+        let claim_info = region.snapshot_claim_info(region_id);
+        let claim_supply = region.snapshot_claim_supply(region_id);
         let history_recipe_rows = recipe_rows.clone();
         let history_crafts = crafts.clone();
         info!(
-            "initial snapshot ready — emitting bulk replace: region_id={} resources={} growth_timers={} enemies={} players={} player_states={} recipes={} crafts={}",
+            "initial snapshot ready — emitting bulk replace: region_id={} resources={} growth_timers={} enemies={} players={} player_states={} recipes={} crafts={} claims={}",
             region_id,
             res.len(),
             growth.len(),
@@ -73,6 +77,7 @@ pub async fn handle(
             player_states.len(),
             recipe_rows.len(),
             crafts.len(),
+            claim_meta.len(),
         );
         send_relay(
             &sinks.relay_tx,
@@ -101,6 +106,12 @@ pub async fn handle(
                     region_id,
                     recipe_rows,
                     rows: crafts,
+                },
+                RelayMsg::ReplaceClaims {
+                    region_id,
+                    meta_rows: claim_meta,
+                    info_rows: claim_info,
+                    supply_rows: claim_supply,
                 },
             ]
             .into_iter(),
@@ -139,6 +150,52 @@ fn update_join_maps(
     update: &upstream_bindings::region::DbUpdate,
 ) {
     let live = region.is_live;
+
+    // Claim auxiliary-building & research caches are needed in both phases to
+    // emit coherent ClaimInfo rows (a row bundles bank/marketplace/waystone/
+    // research together), so maintain them regardless of phase. A claim_state
+    // delete that is not immediately reinserted purges every claim cache.
+    for e in &update.claim_state.deletes {
+        let eid = e.row.entity_id;
+        if !update
+            .claim_state
+            .inserts
+            .iter()
+            .any(|i| i.row.entity_id == eid)
+        {
+            region.claim_research.remove(&eid);
+            region.claim_banks.remove(&eid);
+            region.claim_marketplaces.remove(&eid);
+            region.claim_waystones.remove(&eid);
+            region.claim_local.remove(&eid);
+        }
+    }
+    for e in &update.claim_tech_state.deletes {
+        region.claim_research.remove(&e.row.entity_id);
+    }
+    for e in &update.claim_tech_state.inserts {
+        region
+            .claim_research
+            .insert(e.row.entity_id, e.row.learned.clone());
+    }
+    for e in &update.bank_state.deletes {
+        region.claim_banks.remove(&e.row.claim_entity_id);
+    }
+    for e in &update.bank_state.inserts {
+        region.claim_banks.insert(e.row.claim_entity_id);
+    }
+    for e in &update.marketplace_state.deletes {
+        region.claim_marketplaces.remove(&e.row.claim_entity_id);
+    }
+    for e in &update.marketplace_state.inserts {
+        region.claim_marketplaces.insert(e.row.claim_entity_id);
+    }
+    for e in &update.waystone_state.deletes {
+        region.claim_waystones.remove(&e.row.claim_entity_id);
+    }
+    for e in &update.waystone_state.inserts {
+        region.claim_waystones.insert(e.row.claim_entity_id);
+    }
 
     if !live {
         for e in &update.user_state.deletes {
@@ -184,6 +241,17 @@ fn update_join_maps(
                     owner_entity_id: e.row.owner_entity_id,
                 },
             );
+        }
+
+        // Claim local state drives ClaimMeta + ClaimSupply snapshots. Only
+        // needed in the sync phase; live-phase rows are derived from the batch.
+        for e in &update.claim_local_state.deletes {
+            region.claim_local.remove(&e.row.entity_id);
+        }
+        for e in &update.claim_local_state.inserts {
+            region
+                .claim_local
+                .insert(e.row.entity_id, ClaimLocalData::from_row(&e.row));
         }
 
         // Resources: location_state for coordinates, resource_state for kind.
@@ -311,8 +379,10 @@ fn emit_deltas(
     let mut craft_public_updates: Vec<CraftPublicUpdateRow> = Vec::new();
     let mut craft_progress_deltas: Vec<CraftContributionDeltaRow> = Vec::new();
     let mut craft_expiry_ids: Vec<u64> = Vec::new();
+    let mut claim_supply_upserts: Vec<ClaimSupplyRow> = Vec::new();
+    let mut claim_info_upserts: Vec<ClaimInfoRow> = Vec::new();
+    let mut claim_deletes: Vec<u64> = Vec::new();
     let mut history_msgs: Vec<HistoryMsg> = Vec::new();
-    let update_timestamp_micros = event_timestamp_micros(reducer);
 
     // Resource deletes.
     for e in &update.resource_state.deletes {
@@ -550,6 +620,7 @@ fn emit_deltas(
         _ => None,
     };
     for e in &update.progressive_action_state.inserts {
+        let update_timestamp_micros = event_timestamp_micros(reducer);
         let craft_id = e.row.entity_id;
         if let Some(prev) = update
             .progressive_action_state
@@ -603,6 +674,86 @@ fn emit_deltas(
         {
             craft_expiry_ids.push(e.row.entity_id);
         }
+    }
+
+    // Claim deletions: a claim_state delete without a matching insert means the
+    // claim is gone — drop it from all three relay tables. Compute this first
+    // so supply/info upserts can skip claims that are being deleted.
+    for e in &update.claim_state.deletes {
+        if !update
+            .claim_state
+            .inserts
+            .iter()
+            .any(|ins| ins.row.entity_id == e.row.entity_id)
+        {
+            claim_deletes.push(e.row.entity_id);
+        }
+    }
+    let claim_delete_set: HashSet<u64> = claim_deletes.iter().copied().collect();
+
+    // ClaimSupply upserts. `claim_local_state` is one of the hottest tables in
+    // the game because `xp_gained_since_last_coin_minting` changes constantly.
+    // ClaimLocalData deliberately omits that field, so an update whose tracked
+    // fields are unchanged compares equal and is short-circuited here.
+    for e in &update.claim_local_state.inserts {
+        let eid = e.row.entity_id;
+        if claim_delete_set.contains(&eid) {
+            continue;
+        }
+        let new = ClaimLocalData::from_row(&e.row);
+        if let Some(prev) = update
+            .claim_local_state
+            .deletes
+            .iter()
+            .find(|d| d.row.entity_id == eid)
+            && ClaimLocalData::from_row(&prev.row) == new
+        {
+            // Update touched only untracked fields (e.g. xp) — ignore.
+            continue;
+        }
+        claim_supply_upserts.push(ClaimSupplyRow {
+            entity_id: eid,
+            region_id,
+            supplies: new.supplies,
+            num_tiles: new.num_tiles,
+            num_tile_neighbors: new.num_tile_neighbors,
+            building_maintenance: new.building_maintenance,
+        });
+    }
+
+    // ClaimInfo upserts: a change to a claim's auxiliary buildings or research
+    // requires re-emitting the whole ClaimInfo row (built from the caches that
+    // update_join_maps has already applied for this batch).
+    let mut affected_claims: HashSet<u64> = HashSet::new();
+    for e in &update.claim_tech_state.inserts {
+        affected_claims.insert(e.row.entity_id);
+    }
+    for e in &update.claim_tech_state.deletes {
+        affected_claims.insert(e.row.entity_id);
+    }
+    for e in &update.bank_state.inserts {
+        affected_claims.insert(e.row.claim_entity_id);
+    }
+    for e in &update.bank_state.deletes {
+        affected_claims.insert(e.row.claim_entity_id);
+    }
+    for e in &update.marketplace_state.inserts {
+        affected_claims.insert(e.row.claim_entity_id);
+    }
+    for e in &update.marketplace_state.deletes {
+        affected_claims.insert(e.row.claim_entity_id);
+    }
+    for e in &update.waystone_state.inserts {
+        affected_claims.insert(e.row.claim_entity_id);
+    }
+    for e in &update.waystone_state.deletes {
+        affected_claims.insert(e.row.claim_entity_id);
+    }
+    for eid in affected_claims {
+        if claim_delete_set.contains(&eid) {
+            continue;
+        }
+        claim_info_upserts.push(region.claim_info_row(eid, region_id));
     }
 
     send_relay(
@@ -702,6 +853,24 @@ fn emit_deltas(
         send_relay(
             &sinks.relay_tx,
             std::iter::once(RelayMsg::ScheduleCraftExpiry(craft_expiry_ids)),
+        );
+    }
+    if !claim_supply_upserts.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::UpsertClaimSupply(claim_supply_upserts)),
+        );
+    }
+    if !claim_info_upserts.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::UpsertClaimInfo(claim_info_upserts)),
+        );
+    }
+    if !claim_deletes.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::DeleteClaims(claim_deletes)),
         );
     }
     send_history(&sinks.history_tx, history_msgs.into_iter());

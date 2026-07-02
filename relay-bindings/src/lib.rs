@@ -7,10 +7,17 @@
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 pub mod apply_craft_progress_deltas_reducer;
+pub mod bulk_replace_claims_reducer;
 pub mod bulk_replace_enemies_reducer;
 pub mod bulk_replace_player_states_reducer;
 pub mod bulk_replace_players_reducer;
 pub mod bulk_replace_resources_reducer;
+pub mod claim_info_table;
+pub mod claim_info_type;
+pub mod claim_meta_table;
+pub mod claim_meta_type;
+pub mod claim_supply_table;
+pub mod claim_supply_type;
 pub mod craft_contribution_delta_type;
 pub mod craft_contribution_table;
 pub mod craft_contribution_type;
@@ -20,6 +27,7 @@ pub mod craft_progress_table;
 pub mod craft_progress_type;
 pub mod craft_public_update_type;
 pub mod craft_update_type;
+pub mod delete_claims_reducer;
 pub mod delete_enemies_reducer;
 pub mod delete_player_states_reducer;
 pub mod delete_players_reducer;
@@ -52,16 +60,25 @@ pub mod schedule_craft_expiry_reducer;
 pub mod set_players_offline_reducer;
 pub mod set_players_online_reducer;
 pub mod toggle_public_reducer;
+pub mod upsert_claim_info_reducer;
+pub mod upsert_claim_supply_reducer;
 pub mod upsert_crafts_reducer;
 pub mod upsert_player_states_reducer;
 pub mod upsert_players_reducer;
 pub mod upsert_recipe_meta_reducer;
 
 pub use apply_craft_progress_deltas_reducer::apply_craft_progress_deltas;
+pub use bulk_replace_claims_reducer::bulk_replace_claims;
 pub use bulk_replace_enemies_reducer::bulk_replace_enemies;
 pub use bulk_replace_player_states_reducer::bulk_replace_player_states;
 pub use bulk_replace_players_reducer::bulk_replace_players;
 pub use bulk_replace_resources_reducer::bulk_replace_resources;
+pub use claim_info_table::*;
+pub use claim_info_type::ClaimInfo;
+pub use claim_meta_table::*;
+pub use claim_meta_type::ClaimMeta;
+pub use claim_supply_table::*;
+pub use claim_supply_type::ClaimSupply;
 pub use craft_contribution_delta_type::CraftContributionDelta;
 pub use craft_contribution_table::*;
 pub use craft_contribution_type::CraftContribution;
@@ -71,6 +88,7 @@ pub use craft_progress_table::*;
 pub use craft_progress_type::CraftProgress;
 pub use craft_public_update_type::CraftPublicUpdate;
 pub use craft_update_type::CraftUpdate;
+pub use delete_claims_reducer::delete_claims;
 pub use delete_enemies_reducer::delete_enemies;
 pub use delete_player_states_reducer::delete_player_states;
 pub use delete_players_reducer::delete_players;
@@ -103,6 +121,8 @@ pub use schedule_craft_expiry_reducer::schedule_craft_expiry;
 pub use set_players_offline_reducer::set_players_offline;
 pub use set_players_online_reducer::set_players_online;
 pub use toggle_public_reducer::toggle_public;
+pub use upsert_claim_info_reducer::upsert_claim_info;
+pub use upsert_claim_supply_reducer::upsert_claim_supply;
 pub use upsert_crafts_reducer::upsert_crafts;
 pub use upsert_player_states_reducer::upsert_player_states;
 pub use upsert_players_reducer::upsert_players;
@@ -118,6 +138,12 @@ pub use upsert_recipe_meta_reducer::upsert_recipe_meta;
 pub enum Reducer {
     ApplyCraftProgressDeltas {
         deltas: Vec<CraftContributionDelta>,
+    },
+    BulkReplaceClaims {
+        region_id: u8,
+        meta: Vec<ClaimMeta>,
+        info: Vec<ClaimInfo>,
+        supply: Vec<ClaimSupply>,
     },
     BulkReplaceEnemies {
         region_id: u8,
@@ -138,6 +164,9 @@ pub enum Reducer {
         region_id: u8,
         rows: Vec<ResourceLocation>,
         total: u32,
+    },
+    DeleteClaims {
+        entity_ids: Vec<u64>,
     },
     DeleteEnemies {
         entity_ids: Vec<u64>,
@@ -182,6 +211,12 @@ pub enum Reducer {
     TogglePublic {
         updates: Vec<CraftPublicUpdate>,
     },
+    UpsertClaimInfo {
+        rows: Vec<ClaimInfo>,
+    },
+    UpsertClaimSupply {
+        rows: Vec<ClaimSupply>,
+    },
     UpsertCrafts {
         rows: Vec<CraftUpdate>,
     },
@@ -204,10 +239,12 @@ impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
             Reducer::ApplyCraftProgressDeltas { .. } => "apply_craft_progress_deltas",
+            Reducer::BulkReplaceClaims { .. } => "bulk_replace_claims",
             Reducer::BulkReplaceEnemies { .. } => "bulk_replace_enemies",
             Reducer::BulkReplacePlayerStates { .. } => "bulk_replace_player_states",
             Reducer::BulkReplacePlayers { .. } => "bulk_replace_players",
             Reducer::BulkReplaceResources { .. } => "bulk_replace_resources",
+            Reducer::DeleteClaims { .. } => "delete_claims",
             Reducer::DeleteEnemies { .. } => "delete_enemies",
             Reducer::DeletePlayerStates { .. } => "delete_player_states",
             Reducer::DeletePlayers { .. } => "delete_players",
@@ -223,6 +260,8 @@ impl __sdk::Reducer for Reducer {
             Reducer::SetPlayersOffline { .. } => "set_players_offline",
             Reducer::SetPlayersOnline { .. } => "set_players_online",
             Reducer::TogglePublic { .. } => "toggle_public",
+            Reducer::UpsertClaimInfo { .. } => "upsert_claim_info",
+            Reducer::UpsertClaimSupply { .. } => "upsert_claim_supply",
             Reducer::UpsertCrafts { .. } => "upsert_crafts",
             Reducer::UpsertPlayerStates { .. } => "upsert_player_states",
             Reducer::UpsertPlayers { .. } => "upsert_players",
@@ -238,6 +277,17 @@ impl __sdk::Reducer for Reducer {
                     deltas: deltas.clone(),
                 },
             ),
+            Reducer::BulkReplaceClaims {
+                region_id,
+                meta,
+                info,
+                supply,
+            } => __sats::bsatn::to_vec(&bulk_replace_claims_reducer::BulkReplaceClaimsArgs {
+                region_id: region_id.clone(),
+                meta: meta.clone(),
+                info: info.clone(),
+                supply: supply.clone(),
+            }),
             Reducer::BulkReplaceEnemies {
                 region_id,
                 rows,
@@ -276,6 +326,11 @@ impl __sdk::Reducer for Reducer {
                 rows: rows.clone(),
                 total: total.clone(),
             }),
+            Reducer::DeleteClaims { entity_ids } => {
+                __sats::bsatn::to_vec(&delete_claims_reducer::DeleteClaimsArgs {
+                    entity_ids: entity_ids.clone(),
+                })
+            }
             Reducer::DeleteEnemies { entity_ids } => {
                 __sats::bsatn::to_vec(&delete_enemies_reducer::DeleteEnemiesArgs {
                     entity_ids: entity_ids.clone(),
@@ -347,6 +402,16 @@ impl __sdk::Reducer for Reducer {
                     updates: updates.clone(),
                 })
             }
+            Reducer::UpsertClaimInfo { rows } => {
+                __sats::bsatn::to_vec(&upsert_claim_info_reducer::UpsertClaimInfoArgs {
+                    rows: rows.clone(),
+                })
+            }
+            Reducer::UpsertClaimSupply { rows } => {
+                __sats::bsatn::to_vec(&upsert_claim_supply_reducer::UpsertClaimSupplyArgs {
+                    rows: rows.clone(),
+                })
+            }
             Reducer::UpsertCrafts { rows } => {
                 __sats::bsatn::to_vec(&upsert_crafts_reducer::UpsertCraftsArgs {
                     rows: rows.clone(),
@@ -376,6 +441,9 @@ impl __sdk::Reducer for Reducer {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct DbUpdate {
+    claim_info: __sdk::TableUpdate<ClaimInfo>,
+    claim_meta: __sdk::TableUpdate<ClaimMeta>,
+    claim_supply: __sdk::TableUpdate<ClaimSupply>,
     craft_contribution: __sdk::TableUpdate<CraftContribution>,
     craft_meta: __sdk::TableUpdate<CraftMeta>,
     craft_progress: __sdk::TableUpdate<CraftProgress>,
@@ -393,6 +461,15 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_update in __sdk::transaction_update_iter_table_updates(raw) {
             match &table_update.table_name[..] {
+                "claim_info" => db_update
+                    .claim_info
+                    .append(claim_info_table::parse_table_update(table_update)?),
+                "claim_meta" => db_update
+                    .claim_meta
+                    .append(claim_meta_table::parse_table_update(table_update)?),
+                "claim_supply" => db_update
+                    .claim_supply
+                    .append(claim_supply_table::parse_table_update(table_update)?),
                 "craft_contribution" => db_update
                     .craft_contribution
                     .append(craft_contribution_table::parse_table_update(table_update)?),
@@ -446,6 +523,15 @@ impl __sdk::DbUpdate for DbUpdate {
     ) -> AppliedDiff<'_> {
         let mut diff = AppliedDiff::default();
 
+        diff.claim_info = cache
+            .apply_diff_to_table::<ClaimInfo>("claim_info", &self.claim_info)
+            .with_updates_by_pk(|row| &row.entity_id);
+        diff.claim_meta = cache
+            .apply_diff_to_table::<ClaimMeta>("claim_meta", &self.claim_meta)
+            .with_updates_by_pk(|row| &row.entity_id);
+        diff.claim_supply = cache
+            .apply_diff_to_table::<ClaimSupply>("claim_supply", &self.claim_supply)
+            .with_updates_by_pk(|row| &row.entity_id);
         diff.craft_contribution = cache
             .apply_diff_to_table::<CraftContribution>(
                 "craft_contribution",
@@ -483,6 +569,15 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "claim_info" => db_update
+                    .claim_info
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "claim_meta" => db_update
+                    .claim_meta
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "claim_supply" => db_update
+                    .claim_supply
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "craft_contribution" => db_update
                     .craft_contribution
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -523,6 +618,15 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "claim_info" => db_update
+                    .claim_info
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "claim_meta" => db_update
+                    .claim_meta
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "claim_supply" => db_update
+                    .claim_supply
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "craft_contribution" => db_update
                     .craft_contribution
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -565,6 +669,9 @@ impl __sdk::DbUpdate for DbUpdate {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
+    claim_info: __sdk::TableAppliedDiff<'r, ClaimInfo>,
+    claim_meta: __sdk::TableAppliedDiff<'r, ClaimMeta>,
+    claim_supply: __sdk::TableAppliedDiff<'r, ClaimSupply>,
     craft_contribution: __sdk::TableAppliedDiff<'r, CraftContribution>,
     craft_meta: __sdk::TableAppliedDiff<'r, CraftMeta>,
     craft_progress: __sdk::TableAppliedDiff<'r, CraftProgress>,
@@ -587,6 +694,13 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         event: &EventContext,
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
+        callbacks.invoke_table_row_callbacks::<ClaimInfo>("claim_info", &self.claim_info, event);
+        callbacks.invoke_table_row_callbacks::<ClaimMeta>("claim_meta", &self.claim_meta, event);
+        callbacks.invoke_table_row_callbacks::<ClaimSupply>(
+            "claim_supply",
+            &self.claim_supply,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<CraftContribution>(
             "craft_contribution",
             &self.craft_contribution,
@@ -1284,6 +1398,9 @@ impl __sdk::SpacetimeModule for RemoteModule {
     type QueryBuilder = __sdk::QueryBuilder;
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
+        claim_info_table::register_table(client_cache);
+        claim_meta_table::register_table(client_cache);
+        claim_supply_table::register_table(client_cache);
         craft_contribution_table::register_table(client_cache);
         craft_meta_table::register_table(client_cache);
         craft_progress_table::register_table(client_cache);
@@ -1295,6 +1412,9 @@ impl __sdk::SpacetimeModule for RemoteModule {
         resource_location_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
+        "claim_info",
+        "claim_meta",
+        "claim_supply",
         "craft_contribution",
         "craft_meta",
         "craft_progress",

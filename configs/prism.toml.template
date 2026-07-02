@@ -30,3 +30,4 @@ growth_timers = true
 enemies = true
 players = true
 crafts = false
+claims = true

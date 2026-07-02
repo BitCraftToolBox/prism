@@ -67,6 +67,7 @@ enemies = false
 players = false
 growth_timers = false
 crafts = false
+claims = false
 """
 m_d_1 = """
 [[upstream.regions.dumps]]
@@ -127,6 +128,7 @@ growth_timers = false
 enemies = false
 players = false
 crafts = true
+claims = false
 """
 
 if craft_mon:

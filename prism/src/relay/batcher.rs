@@ -1,11 +1,12 @@
 //! Latency-tiered batcher for the relay sink.
 //!
-//! Three flush timers: players ~500ms, enemies ~1000ms, resources ~2500ms.
+//! Five flush timers: players ~500ms, enemies ~1000ms, resources ~2500ms,
+//! crafts ~2500ms, claims ~2500ms.
 //! Replace* messages flush immediately (in chunks to stay under the 32MB
 //! WebSocket limit). Deletes are batched with their respective pipeline.
 //!
 //! # Reconnect behavior
-//! Before every flush-tick (players, enemies, resources) the batcher calls
+//! Before every flush-tick (players, enemies, resources, crafts, claims) the batcher calls
 //! `ensure_connected`, which checks `conn.is_active()` and, if the connection
 //! has gone away, waits `RECONNECT_DELAY` and reconnects. Any upsert/delete
 //! rows buffered in `Batches` at the moment of disconnect are retained and
@@ -21,9 +22,9 @@ use anyhow::Result;
 use log::{debug, error, info, warn};
 use metrics::{counter, gauge, histogram};
 use relay_bindings::{
-    CraftContributionDelta, CraftPublicUpdate, CraftUpdate, EnemyLocation, GrowthTimerUpdate,
-    MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate, PlayerState, RecipeMeta,
-    ResourceLocation,
+    ClaimInfo, ClaimMeta, ClaimSupply, CraftContributionDelta, CraftPublicUpdate, CraftUpdate,
+    EnemyLocation, GrowthTimerUpdate, MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate,
+    PlayerState, RecipeMeta, ResourceLocation,
 };
 use relay_sdk::Timestamp;
 use tokio::sync::mpsc::Receiver;
@@ -31,9 +32,9 @@ use tokio::time::{Instant, interval_at};
 
 use super::connection::{RECONNECT_DELAY, RelayConnection};
 use super::{
-    CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow,
-    MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RelayMsg,
-    ResourceRow,
+    ClaimInfoRow, ClaimMetaRow, ClaimSupplyRow, CraftContributionDeltaRow, CraftPublicUpdateRow,
+    CraftUpdateRow, EnemyRow, GrowthTimerRow, MobileMoveRow, PlayerRenameRow, PlayerRow,
+    PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow,
 };
 use crate::config::{Config, RelayConfig};
 use crate::shutdown::SharedShutdown;
@@ -41,6 +42,8 @@ use crate::shutdown::SharedShutdown;
 const PLAYER_FLUSH_MS: u64 = 500;
 const ENEMY_FLUSH_MS: u64 = 1000;
 const RESOURCE_FLUSH_MS: u64 = 2500;
+const CRAFT_FLUSH_MS: u64 = 2500;
+const CLAIM_FLUSH_MS: u64 = 2500;
 
 const MAX_BATCH: usize = 50_000;
 
@@ -74,6 +77,9 @@ struct Batches {
     craft_public_updates: Vec<CraftPublicUpdate>,
     craft_progress_deltas: Vec<CraftContributionDelta>,
     craft_expiry_ids: Vec<u64>,
+    claim_info_upserts: Vec<ClaimInfo>,
+    claim_supply_upserts: Vec<ClaimSupply>,
+    claim_deletes: Vec<u64>,
 }
 
 fn to_resource_location(r: &ResourceRow) -> ResourceLocation {
@@ -169,6 +175,35 @@ fn to_craft_progress_delta(r: &CraftContributionDeltaRow) -> CraftContributionDe
         last_seen: Timestamp::from_micros_since_unix_epoch(r.last_seen_micros),
     }
 }
+fn to_claim_meta(r: &ClaimMetaRow) -> ClaimMeta {
+    ClaimMeta {
+        entity_id: r.entity_id,
+        region_id: r.region_id,
+        x: r.x,
+        z: r.z,
+        building_desc_id: r.building_desc_id,
+    }
+}
+fn to_claim_info(r: &ClaimInfoRow) -> ClaimInfo {
+    ClaimInfo {
+        entity_id: r.entity_id,
+        region_id: r.region_id,
+        bank: r.bank,
+        marketplace: r.marketplace,
+        waystone: r.waystone,
+        research: r.research.clone(),
+    }
+}
+fn to_claim_supply(r: &ClaimSupplyRow) -> ClaimSupply {
+    ClaimSupply {
+        entity_id: r.entity_id,
+        region_id: r.region_id,
+        supplies: r.supplies,
+        num_tiles: r.num_tiles,
+        num_tile_neighbors: r.num_tile_neighbors,
+        building_maintenance: r.building_maintenance,
+    }
+}
 
 /// Attempt to connect, retrying with backoff until successful or shutdown.
 /// Returns `None` if shutdown was triggered before a connection was made.
@@ -252,6 +287,14 @@ pub async fn run(
     let mut resource_tick = interval_at(
         now + Duration::from_millis(RESOURCE_FLUSH_MS),
         Duration::from_millis(RESOURCE_FLUSH_MS),
+    );
+    let mut craft_tick = interval_at(
+        now + Duration::from_millis(CRAFT_FLUSH_MS),
+        Duration::from_millis(CRAFT_FLUSH_MS),
+    );
+    let mut claim_tick = interval_at(
+        now + Duration::from_millis(CLAIM_FLUSH_MS),
+        Duration::from_millis(CLAIM_FLUSH_MS),
     );
 
     let mut batches = Batches::default();
@@ -350,6 +393,19 @@ pub async fn run(
                             region_id,
                         );
                     }
+                    RelayMsg::ReplaceClaims { region_id, meta_rows, info_rows, supply_rows } => {
+                        flush_claim_batch(&conn, &mut batches);
+                        let meta: Vec<ClaimMeta> = meta_rows.iter().map(to_claim_meta).collect();
+                        let info: Vec<ClaimInfo> = info_rows.iter().map(to_claim_info).collect();
+                        let supply: Vec<ClaimSupply> = supply_rows.iter().map(to_claim_supply).collect();
+                        info!(
+                            "relay: {} bulk_replace_claims meta={} info={} supply={}",
+                            region_id, meta.len(), info.len(), supply.len()
+                        );
+                        if let Err(e) = conn.bulk_replace_claims(region_id, meta, info, supply) {
+                            warn!("relay: bulk_replace_claims: {e:?}");
+                        }
+                    }
                     RelayMsg::InsertResource(row) => {
                         batches.resource_inserts.push(to_resource_location(&row));
                         if batches.resource_inserts.len() >= MAX_BATCH { flush_resource_batch(&conn, &mut batches); }
@@ -421,6 +477,18 @@ pub async fn run(
                         batches.craft_expiry_ids.extend(craft_ids);
                         if batches.craft_expiry_ids.len() >= MAX_BATCH { flush_craft_batch(&conn, &mut batches); }
                     }
+                    RelayMsg::UpsertClaimInfo(rows) => {
+                        batches.claim_info_upserts.extend(rows.iter().map(to_claim_info));
+                        if batches.claim_info_upserts.len() >= MAX_BATCH { flush_claim_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::UpsertClaimSupply(rows) => {
+                        batches.claim_supply_upserts.extend(rows.iter().map(to_claim_supply));
+                        if batches.claim_supply_upserts.len() >= MAX_BATCH { flush_claim_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::DeleteClaims(ids) => {
+                        batches.claim_deletes.extend(ids);
+                        if batches.claim_deletes.len() >= MAX_BATCH { flush_claim_batch(&conn, &mut batches); }
+                    }
                 }
             }
 
@@ -435,7 +503,6 @@ pub async fn run(
                 flush_player_online(&conn, &mut batches);
                 flush_player_offline(&conn, &mut batches);
                 flush_player_renames(&conn, &mut batches);
-                flush_craft_batch(&conn, &mut batches);
                 histogram!("prism_relay_flush_duration_seconds", "pipeline" => "player")
                     .record(t.elapsed().as_secs_f64());
             }
@@ -458,6 +525,24 @@ pub async fn run(
                 histogram!("prism_relay_flush_duration_seconds", "pipeline" => "resource")
                     .record(t.elapsed().as_secs_f64());
             }
+            _ = craft_tick.tick() => {
+                if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
+                gauge!("prism_relay_batch_depth", "pipeline" => "craft")
+                    .set(batches.craft_upserts.len() as f64);
+                let t = std::time::Instant::now();
+                flush_craft_batch(&conn, &mut batches);
+                histogram!("prism_relay_flush_duration_seconds", "pipeline" => "craft")
+                    .record(t.elapsed().as_secs_f64());
+            }
+            _ = claim_tick.tick() => {
+                if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
+                gauge!("prism_relay_batch_depth", "pipeline" => "claim")
+                    .set(batches.claim_info_upserts.len() as f64 + batches.claim_supply_upserts.len() as f64);
+                let t = std::time::Instant::now();
+                flush_claim_batch(&conn, &mut batches);
+                histogram!("prism_relay_flush_duration_seconds", "pipeline" => "claim")
+                    .record(t.elapsed().as_secs_f64());
+            }
         }
     }
 
@@ -472,6 +557,7 @@ pub async fn run(
     flush_player_offline(&conn, &mut batches);
     flush_player_renames(&conn, &mut batches);
     flush_craft_batch(&conn, &mut batches);
+    flush_claim_batch(&conn, &mut batches);
     info!("relay batcher: disconnecting...");
     conn.disconnect();
     Ok(())
@@ -689,6 +775,31 @@ fn flush_craft_batch(conn: &RelayConnection, batches: &mut Batches) {
         );
         if let Err(e) = conn.schedule_craft_expiry(craft_ids) {
             warn!("relay: schedule_craft_expiry: {e:?}");
+        }
+    }
+}
+
+fn flush_claim_batch(conn: &RelayConnection, batches: &mut Batches) {
+    // Upserts before deletes so a delete in the same window always wins.
+    if !batches.claim_info_upserts.is_empty() {
+        let rows = std::mem::take(&mut batches.claim_info_upserts);
+        debug!("relay flush: upsert_claim_info count={}", rows.len());
+        if let Err(e) = conn.upsert_claim_info(rows) {
+            warn!("relay: upsert_claim_info: {e:?}");
+        }
+    }
+    if !batches.claim_supply_upserts.is_empty() {
+        let rows = std::mem::take(&mut batches.claim_supply_upserts);
+        debug!("relay flush: upsert_claim_supply count={}", rows.len());
+        if let Err(e) = conn.upsert_claim_supply(rows) {
+            warn!("relay: upsert_claim_supply: {e:?}");
+        }
+    }
+    if !batches.claim_deletes.is_empty() {
+        let ids = std::mem::take(&mut batches.claim_deletes);
+        debug!("relay flush: delete_claims count={}", ids.len());
+        if let Err(e) = conn.delete_claims(ids) {
+            warn!("relay: delete_claims: {e:?}");
         }
     }
 }

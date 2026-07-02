@@ -7,7 +7,8 @@
 //! maintained across update batches, mirroring nodeindex's `consume()`.
 
 use crate::relay::{
-    CraftUpdateRow, EnemyRow, GrowthTimerRow, PlayerRow, PlayerStateRow, RecipeMetaRow, ResourceRow,
+    ClaimInfoRow, ClaimMetaRow, ClaimSupplyRow, CraftUpdateRow, EnemyRow, GrowthTimerRow,
+    PlayerRow, PlayerStateRow, RecipeMetaRow, ResourceRow,
 };
 use hashbrown::{HashMap, HashSet};
 use upstream_bindings::region::CraftingRecipeDesc;
@@ -49,6 +50,22 @@ pub struct RegionJoinState {
     pub public_craft_ids: HashSet<u64>,
     /// entity_id -> progressive craft state (sync-phase cache).
     pub progressive_crafts: HashMap<u64, ProgressiveCraftState>,
+    /// claim entity_id -> local state fields for ClaimMeta/ClaimSupply.
+    /// Sync-phase only (rebuilt from the batch in live phase); cleared by
+    /// clear_live_caches.
+    pub claim_local: HashMap<u64, ClaimLocalData>,
+    /// claim entity_id -> learned research tech ids.
+    ///
+    /// Unlike the other claim caches this is **kept alive in the live phase**:
+    /// a ClaimInfo row bundles bank/marketplace/waystone/research together, so
+    /// when any one changes we need the others to emit a coherent upsert.
+    pub claim_research: HashMap<u64, Vec<i32>>,
+    /// claim entity_ids that currently have a bank (kept alive in live phase).
+    pub claim_banks: HashSet<u64>,
+    /// claim entity_ids that currently have a marketplace (kept alive in live phase).
+    pub claim_marketplaces: HashSet<u64>,
+    /// claim entity_ids that currently have a waystone (kept alive in live phase).
+    pub claim_waystones: HashSet<u64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -56,6 +73,35 @@ pub struct EntityLocation {
     pub x: i32,
     pub z: i32,
     pub dimension: u32,
+}
+
+/// The subset of `claim_local_state` fields we mirror into the relay.
+/// Deliberately excludes `xp_gained_since_last_coin_minting` (and other
+/// untracked fields) so we can cheaply detect no-op updates on the hot path.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClaimLocalData {
+    pub x: i32,
+    pub z: i32,
+    pub building_desc_id: i32,
+    pub supplies: i32,
+    pub num_tiles: u32,
+    pub num_tile_neighbors: u32,
+    pub building_maintenance: f32,
+}
+
+impl ClaimLocalData {
+    pub fn from_row(row: &upstream_bindings::region::ClaimLocalState) -> Self {
+        let (x, z) = row.location.as_ref().map_or((0, 0), |l| (l.x, l.z));
+        Self {
+            x,
+            z,
+            building_desc_id: row.building_description_id,
+            supplies: row.supplies,
+            num_tiles: row.num_tiles.max(0) as u32,
+            num_tile_neighbors: row.num_tile_neighbors,
+            building_maintenance: row.building_maintenance,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -212,6 +258,69 @@ impl RegionJoinState {
             .collect()
     }
 
+    /// Collect all known claims' metadata (location + core building) as relay
+    /// rows for a bulk replace.
+    pub fn snapshot_claim_meta(&self, region_id: u8) -> Vec<ClaimMetaRow> {
+        self.claim_local
+            .iter()
+            .map(|(&eid, data)| ClaimMetaRow {
+                entity_id: eid,
+                region_id,
+                x: data.x,
+                z: data.z,
+                building_desc_id: data.building_desc_id,
+            })
+            .collect()
+    }
+
+    /// Collect all known claims' auxiliary-building/research info as relay rows.
+    pub fn snapshot_claim_info(&self, region_id: u8) -> Vec<ClaimInfoRow> {
+        self.claim_local
+            .keys()
+            .map(|&eid| ClaimInfoRow {
+                entity_id: eid,
+                region_id,
+                bank: self.claim_banks.contains(&eid),
+                marketplace: self.claim_marketplaces.contains(&eid),
+                waystone: self.claim_waystones.contains(&eid),
+                research: self.claim_research.get(&eid).cloned().unwrap_or_default(),
+            })
+            .collect()
+    }
+
+    /// Collect all known claims' supply/upkeep numbers as relay rows.
+    pub fn snapshot_claim_supply(&self, region_id: u8) -> Vec<ClaimSupplyRow> {
+        self.claim_local
+            .iter()
+            .map(|(&eid, data)| ClaimSupplyRow {
+                entity_id: eid,
+                region_id,
+                supplies: data.supplies,
+                num_tiles: data.num_tiles,
+                num_tile_neighbors: data.num_tile_neighbors,
+                building_maintenance: data.building_maintenance,
+            })
+            .collect()
+    }
+
+    /// Build a coherent ClaimInfo row for a single claim from the currently
+    /// tracked caches. Used in the live phase when an auxiliary building or
+    /// research changes.
+    pub fn claim_info_row(&self, entity_id: u64, region_id: u8) -> ClaimInfoRow {
+        ClaimInfoRow {
+            entity_id,
+            region_id,
+            bank: self.claim_banks.contains(&entity_id),
+            marketplace: self.claim_marketplaces.contains(&entity_id),
+            waystone: self.claim_waystones.contains(&entity_id),
+            research: self
+                .claim_research
+                .get(&entity_id)
+                .cloned()
+                .unwrap_or_default(),
+        }
+    }
+
     /// Drop all sync-phase caches and initialize live-phase state.
     /// Called once after the initial bulk snapshot has been emitted so that
     /// delta mode carries only the minimal data needed for routing.
@@ -233,6 +342,12 @@ impl RegionJoinState {
         self.recipe_map = HashMap::default();
         self.public_craft_ids = HashSet::default();
         self.progressive_crafts = HashMap::default();
+        // claim_local is only needed to build the snapshot; live-phase
+        // ClaimSupply/ClaimMeta rows are derived directly from update batches.
+        self.claim_local = HashMap::default();
+        // claim_research / claim_banks / claim_marketplaces / claim_waystones
+        // are intentionally retained: live-phase ClaimInfo upserts need the
+        // full set of flags to emit a coherent row.
     }
 }
 

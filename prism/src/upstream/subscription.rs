@@ -35,6 +35,12 @@ pub enum Pipeline {
     /// `crafting_recipe_desc` (for stats) + `building_state` (for claim id).
     /// Feeds craft meta, progress, and contribution (and recipe meta).
     Crafts,
+    /// `claim_state` (existence/deletion) + `claim_local_state` (location,
+    /// supplies, upkeep) + `claim_tech_state` (research) +
+    /// `waystone_state` / `bank_state` / `marketplace_state` (auxiliary
+    /// buildings). Feeds the relay `claim_meta`, `claim_info`, and
+    /// `claim_supply` tables.
+    Claims,
 }
 
 impl Pipeline {
@@ -70,6 +76,14 @@ impl Pipeline {
                 "SELECT * FROM public_progressive_action_state;".into(),
                 "SELECT * FROM building_state;".into(),
             ],
+            Pipeline::Claims => vec![
+                "SELECT * FROM claim_state;".into(),
+                "SELECT * FROM claim_local_state;".into(),
+                "SELECT * FROM claim_tech_state;".into(),
+                "SELECT * FROM waystone_state;".into(),
+                "SELECT * FROM bank_state;".into(),
+                "SELECT * FROM marketplace_state;".into(),
+            ],
         }
     }
 }
@@ -90,6 +104,9 @@ pub fn enabled_pipelines(cfg: &PipelinesConfig) -> Vec<Pipeline> {
     }
     if cfg.crafts {
         out.push(Pipeline::Crafts);
+    }
+    if cfg.claims {
+        out.push(Pipeline::Claims);
     }
     out
 }

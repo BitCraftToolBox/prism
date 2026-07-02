@@ -50,6 +50,13 @@ pub enum RelayMsg {
         recipe_rows: Vec<RecipeMetaRow>,
         rows: Vec<CraftUpdateRow>,
     },
+    /// Snapshot-phase payload: full replacement of all claim tables for a region.
+    ReplaceClaims {
+        region_id: u8,
+        meta_rows: Vec<ClaimMetaRow>,
+        info_rows: Vec<ClaimInfoRow>,
+        supply_rows: Vec<ClaimSupplyRow>,
+    },
 
     InsertResource(ResourceRow),
     InsertGrowthTimer(GrowthTimerRow),
@@ -62,6 +69,12 @@ pub enum RelayMsg {
     ToggleCraftPublic(Vec<CraftPublicUpdateRow>),
     ApplyCraftProgressDeltas(Vec<CraftContributionDeltaRow>),
     ScheduleCraftExpiry(Vec<u64>),
+    /// Live-phase delta: upsert ClaimInfo rows (bank/marketplace/waystone/research).
+    UpsertClaimInfo(Vec<ClaimInfoRow>),
+    /// Live-phase delta: upsert ClaimSupply rows (supplies/tiles/upkeep).
+    UpsertClaimSupply(Vec<ClaimSupplyRow>),
+    /// Live-phase delta: a claim was removed upstream; drop it from all tables.
+    DeleteClaims(Vec<u64>),
 
     DeleteResource(u64),
     DeleteEnemy(u64),
@@ -169,6 +182,35 @@ pub struct CraftContributionDeltaRow {
     pub progress_delta: i32,
     pub progress_total: i32,
     pub last_seen_micros: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaimMetaRow {
+    pub entity_id: u64,
+    pub region_id: u8,
+    pub x: i32,
+    pub z: i32,
+    pub building_desc_id: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaimInfoRow {
+    pub entity_id: u64,
+    pub region_id: u8,
+    pub bank: bool,
+    pub marketplace: bool,
+    pub waystone: bool,
+    pub research: Vec<i32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaimSupplyRow {
+    pub entity_id: u64,
+    pub region_id: u8,
+    pub supplies: i32,
+    pub num_tiles: u32,
+    pub num_tile_neighbors: u32,
+    pub building_maintenance: f32,
 }
 
 pub async fn run(
