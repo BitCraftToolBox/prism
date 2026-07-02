@@ -16,9 +16,9 @@ export const jsonParseDuration = new Histogram({
     registers: [registry],
 });
 
-export const jsonRowsTotal = new Counter({
-    name: 'features_json_rows_total',
-    help: 'Number of rows loaded from region JSON files',
+export const dataRowsCount = new Gauge({
+    name: 'features_data_row_count',
+    help: 'Number of rows loaded from region JSON files and global queries',
     labelNames: ['table'] as const,
     registers: [registry],
 });

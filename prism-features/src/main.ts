@@ -10,7 +10,7 @@ import {
     geojsonGenerationDuration,
     globalFetchDuration,
     jsonParseDuration,
-    jsonRowsTotal,
+    dataRowsCount,
     runDuration,
 } from "./metrics";
 import {build_watchtower_territories} from "./watchtower";
@@ -38,12 +38,13 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
 
     const [region_data, parseSecs] = time(() => load_region_data(config.input_dir));
     jsonParseDuration.observe(parseSecs);
-    jsonRowsTotal.labels('claim_state').inc(region_data.claim_state.length);
-    jsonRowsTotal.labels('claim_local_state').inc(region_data.claim_local_state.length);
-    jsonRowsTotal.labels('growth_timers').inc(region_data.growth_timers.length);
+    dataRowsCount.labels('claim_state').set(region_data.claim_state.length);
+    dataRowsCount.labels('growth_timers').set(region_data.growth_timers.length);
 
     const [global_data, fetchSecs] = await timeAsync(() => fetch_global_data(config));
     globalFetchDuration.observe(fetchSecs);
+    dataRowsCount.labels('empire_state').set(global_data.empire_state.length);
+    dataRowsCount.labels('empire_chunk_state').set(global_data.empire_chunk_state.length);
 
     const genTimer = geojsonGenerationDuration.startTimer({layer: 'all'});
     const local_state_map = new Map(region_data.claim_local_state.map((row) => [row.entity_id, row]));
