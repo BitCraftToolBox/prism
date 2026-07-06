@@ -714,7 +714,7 @@ fn flush_mobile_moves(conn: &RelayConnection, batches: &mut Batches) {
     if !batches.mobile_moves.is_empty() {
         let moves = std::mem::take(&mut batches.mobile_moves);
         debug!("relay flush: move_mobile_entities count={}", moves.len());
-        counter!("prism_relay_flush_rows_total", "pipeline" => "player", "op" => "move")
+        counter!("prism_relay_flush_rows_total", "pipeline" => "mobiles", "op" => "move")
             .increment(moves.len() as u64);
         if let Err(e) = conn.move_mobile_entities(moves) {
             warn!("relay: move_mobile_entities: {e:?}");
