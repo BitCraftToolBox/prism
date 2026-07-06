@@ -222,16 +222,14 @@ async fn run_task(
             }
             Ok(Err(e)) => {
                 error!("[scheduler] {} failed: {:#}", renderer, e);
-                gauge!("cartographer_task_last_success", "task" => renderer_label.clone())
-                    .set(0.0);
+                gauge!("cartographer_task_last_success", "task" => renderer_label.clone()).set(0.0);
                 counter!("cartographer_task_total", "task" => renderer_label, "status" => "failed")
                     .increment(1);
                 let _ = std::fs::remove_dir_all(&temp_tiles_dir);
             }
             Err(e) => {
                 error!("[scheduler] {} task panicked: {:?}", renderer, e);
-                gauge!("cartographer_task_last_success", "task" => renderer_label.clone())
-                    .set(0.0);
+                gauge!("cartographer_task_last_success", "task" => renderer_label.clone()).set(0.0);
                 counter!("cartographer_task_total", "task" => renderer_label, "status" => "panicked")
                     .increment(1);
                 let _ = std::fs::remove_dir_all(&temp_tiles_dir);

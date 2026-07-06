@@ -42,6 +42,7 @@ fn error_is_normal_disconnect(e: &upstream_bindings::sdk::Error) -> bool {
 pub async fn run_region(
     config: Arc<Config>,
     region: RegionConfig,
+    reconnect_offset: Duration,
     proc_tx: UnboundedSender<RegionUpdate>,
     dump_tx: Sender<DumpMsg>,
     shutdown: SharedShutdown,
@@ -192,7 +193,7 @@ pub async fn run_region(
         if connected {
             reconnect_backoff_idx = 0;
         }
-        let reconnect_backoff = RECONNECT_BACKOFF_STEPS[reconnect_backoff_idx];
+        let reconnect_backoff = RECONNECT_BACKOFF_STEPS[reconnect_backoff_idx] + reconnect_offset;
         if !connected {
             reconnect_backoff_idx =
                 (reconnect_backoff_idx + 1).min(RECONNECT_BACKOFF_STEPS.len() - 1);

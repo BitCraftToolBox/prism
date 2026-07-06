@@ -2,12 +2,12 @@ import os
 import sys
 
 region_groups = {
+    # temp regions
+    (4, "temp"): [3, 11, 15, 23]
     # main regions
     (3, "top"): [17, 18, 19],
     (2, "mid"): [12, 13, 14],
     (1, "bot"): [7, 8, 9],
-    # temp regions
-    (4, "temp"): [3, 11, 15, 23]
 }
 
 mapper = [7, 8, 9, 12, 13, 14, 17, 18, 19, 3, 11, 15, 23]
@@ -26,7 +26,6 @@ compose_header, compose_service = compose_template.split("$SERVICE$", 1)
 before, after = prism_template.split("$REGIONS$")
 
 offset1 = 0
-offset2 = 15
 
 compose_output = compose_header
 
@@ -36,15 +35,13 @@ for (group, name), regions in region_groups.items():
     outfile = f"prism-{group}.toml"
     output = (before
               .replace("$OFFSET$", str(offset1))
-              .replace("$OFFSET2$", str(offset2))
               .replace("$NAME$", "prism-" + name))
     for region in regions:
         output += "\n[[upstream.regions]]\n"\
                   f"name = \"bitcraft-live-{region}\"\n"\
                   f"id = {region}\n"
     output += after
-    offset1 += 1
-    offset2 += 1
+    offset1 += 15
     with open(os.path.join(out_dir, outfile), "w") as f:
         f.write(output)
 

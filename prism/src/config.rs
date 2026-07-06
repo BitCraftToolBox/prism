@@ -36,7 +36,16 @@ pub struct UpstreamConfig {
     /// entirely inherits this list.
     #[serde(default)]
     pub default_dump_schedule: Option<Vec<DumpScheduleConfig>>,
+    /// Individual region configurations, one per upstream module.
     pub regions: Vec<RegionConfig>,
+    /// Added to every region's reconnect backoff unconditionally. Useful for
+    /// staggering prism instances so they don't all hammer the downstream at once.
+    #[serde(default)]
+    pub reconnect_base_offset_secs: Option<u64>,
+    /// Per-region offset multiplier. Region at index `i` waits an extra
+    /// `reconnect_region_offset_secs * i` seconds before reconnecting.
+    #[serde(default)]
+    pub reconnect_region_offset_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

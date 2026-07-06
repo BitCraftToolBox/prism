@@ -14,6 +14,7 @@ pub mod subscription;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::time::Duration;
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::Sender;
@@ -84,18 +85,23 @@ pub async fn run_all(
 ) -> anyhow::Result<()> {
     let dump_manual_trigger_tx = setup_dump_manual_trigger_signal();
 
+    let base_offset = config.upstream.reconnect_base_offset_secs.unwrap_or(0);
+    let region_offset = config.upstream.reconnect_region_offset_secs.unwrap_or(0);
+
     let mut handles = Vec::new();
-    for region in &config.upstream.regions {
+    for (index, region) in config.upstream.regions.iter().enumerate() {
         let region = region.clone();
         let config = config.clone();
         let tx = tx.clone();
         let dump_tx = dump_tx.clone();
         let shutdown = shutdown.clone();
         let dump_manual_trigger_tx = dump_manual_trigger_tx.clone();
+        let reconnect_offset = Duration::from_secs(base_offset + region_offset * index as u64);
         handles.push(tokio::spawn(async move {
             connection::run_region(
                 config,
                 region,
+                reconnect_offset,
                 tx,
                 dump_tx,
                 shutdown,

@@ -1,5 +1,7 @@
 [upstream]
 host = "https://bitcraft-early-access.spacetimedb.com"
+reconnect_base_offset_secs = $OFFSET$
+reconnect_region_offset_secs = 5
 
 [[upstream.default_dump_schedule]]
 # feature renderers - every 15 min
