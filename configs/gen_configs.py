@@ -3,7 +3,7 @@ import sys
 
 region_groups = {
     # temp regions
-    (4, "temp"): [3, 11, 15, 23]
+    (4, "temp"): [3, 11, 15, 23],
     # main regions
     (3, "top"): [17, 18, 19],
     (2, "mid"): [12, 13, 14],
@@ -40,7 +40,7 @@ for (group, name), regions in region_groups.items():
         output += "\n[[upstream.regions]]\n"\
                   f"name = \"bitcraft-live-{region}\"\n"\
                   f"id = {region}\n"
-    output += after
+    output += after.replace("$NAME$", "prism-" + name)
     offset1 += 15
     with open(os.path.join(out_dir, outfile), "w") as f:
         f.write(output)

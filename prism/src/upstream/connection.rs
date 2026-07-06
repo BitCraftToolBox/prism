@@ -88,7 +88,6 @@ pub async fn run_region(
         // Per-connection phase shared between the connection task and the
         // channel-drain task.
         let phase: SharedPhase = Arc::new(AtomicU8::new(Phase::Syncing as u8));
-        let connect_start = std::time::Instant::now();
 
         // The cacheless update channel is private to one connection — we
         // drain it from a helper task that re-emits tagged updates.
@@ -134,6 +133,7 @@ pub async fn run_region(
                 let phase = phase_for_connect.clone();
                 let region_name = region_name_for_log.clone();
                 let region_label_for_live = region_name_for_log.clone();
+                let connect_start = std::time::Instant::now();
                 queue_subscribe(
                     ctx,
                     &region_name_for_log,
@@ -319,6 +319,8 @@ async fn run_dump_schedule(
         );
 
         // Open a short-lived connection purely for this dump.
+        let dump_start = std::sync::Arc::new(std::sync::Mutex::new(None::<std::time::Instant>));
+        let dump_start_write = std::sync::Arc::clone(&dump_start);
         let (cache_tx, mut cache_rx) = unbounded_channel::<DbUpdate>();
         let tables_for_connect = cfg.tables.clone();
         let module_for_log = module_name.clone();
@@ -341,6 +343,7 @@ async fn run_dump_schedule(
                         None => format!("SELECT * FROM {};", t.name),
                     })
                     .collect();
+                *dump_start_write.lock().unwrap() = Some(std::time::Instant::now());
                 ctx.subscription_builder().subscribe(queries);
             })
             .on_disconnect(|_, _| {})
@@ -388,6 +391,13 @@ async fn run_dump_schedule(
             }
             upd = cache_rx.recv() => {
                 if let Some(upd) = upd {
+                    if let Some(start) = *dump_start.lock().unwrap() {
+                        gauge!(
+                            "prism_dump_sync_last_duration_seconds",
+                            "region" => module_name.clone()
+                        )
+                        .set(start.elapsed().as_secs_f64())
+                    }
                     let arrived: Vec<SupportedTable> = pending
                         .keys()
                         .copied()

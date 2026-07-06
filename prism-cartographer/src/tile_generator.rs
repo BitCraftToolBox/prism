@@ -49,6 +49,7 @@ pub fn generate_tiles(
     output_dir: &std::path::Path,
     scaling: TileScaling,
     canceled: &AtomicBool,
+    task: &str,
 ) -> Result<()> {
     let (img_w, img_h) = img.dimensions();
     let mut total = 0u32;
@@ -83,7 +84,7 @@ pub fn generate_tiles(
             TileScaling::Nearest => nn_downscale(img, img_w, img_h, proj_w, proj_h),
             TileScaling::Lanczos3 => lanczos3_downscale(img, proj_w, proj_h)?,
         };
-        gauge!("cartographer_resize_last_duration_seconds", "zoom" => zoom_label.clone())
+        gauge!("cartographer_resize_last_duration_seconds", "task" => task.to_string(), "zoom" => zoom_label.clone())
             .set(resize_start.elapsed().as_secs_f64());
 
         let encode_start = std::time::Instant::now();
@@ -118,10 +119,10 @@ pub fn generate_tiles(
                 count += 1;
             }
         }
-        gauge!("cartographer_encode_last_duration_seconds", "zoom" => zoom_label.clone())
+        gauge!("cartographer_encode_last_duration_seconds", "task" => task.to_string(), "zoom" => zoom_label.clone())
             .set(encode_start.elapsed().as_secs_f64());
-        gauge!("cartographer_tile_count", "zoom" => zoom_label.clone()).set(count as f64);
-        gauge!("cartographer_tile_bytes_total", "zoom" => zoom_label).set(zoom_bytes as f64);
+        gauge!("cartographer_tile_bytes_total", "task" => task.to_string(), "zoom" => zoom_label)
+            .set(zoom_bytes as f64);
 
         total += count;
         log::info!("[tiles] zoom {} → {} tiles", crs_zoom, count);
@@ -156,10 +157,11 @@ pub fn generate_tiles_from_raw(
     output_dir: &std::path::Path,
     scaling: TileScaling,
     canceled: &AtomicBool,
+    task: &str,
 ) -> Result<()> {
     let owned: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, data.to_vec())
         .context("Invalid image dimensions for raw data")?;
-    generate_tiles(&owned, output_dir, scaling, canceled)
+    generate_tiles(&owned, output_dir, scaling, canceled, task)
 }
 
 fn nn_downscale(

@@ -273,6 +273,7 @@ pub fn render(
         tiles_dir,
         tile_generator::TileScaling::Nearest,
         canceled,
+        "terrain",
     )?;
 
     log::info!("[terrain] done");

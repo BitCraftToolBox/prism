@@ -102,6 +102,7 @@ pub fn render(tiles_dir: &Path, canceled: &AtomicBool) -> Result<()> {
         tiles_dir,
         tile_generator::TileScaling::Nearest,
         canceled,
+        "game",
     )?;
 
     log::info!("[game] done");

@@ -164,6 +164,7 @@ pub fn render(
         tiles_dir,
         tile_generator::TileScaling::Lanczos3,
         canceled,
+        "roads",
     )?;
 
     log::info!("[roads] done");
