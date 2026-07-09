@@ -114,6 +114,18 @@ export function add_feature(
                 iconName: 'shipwreck',
             }, location.x, location.z));
             break;
+        case 26020371:
+            outputs.uncharted.push(make_feature({
+                name: claim_name,
+                iconName: 'uncharted-ruin'
+            }, location.x, location.z));
+            break;
+        case 159732292:
+            outputs.uncharted.push(make_feature({
+                name: claim_name,
+                iconName: 'silkmoth-grounds'
+            }, location.x, location.z));
+            break;
         case 489406613:
         case 1752479333:
         case 1662809355:
