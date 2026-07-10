@@ -16,7 +16,7 @@ use log::{debug, warn};
 use metrics::histogram;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, channel};
 
-use crate::config::Config;
+use crate::config::{Config, PipelinesConfig};
 use crate::history::{HistoryMsg, history_capacity, history_enabled};
 use crate::relay::{RelayMsg, relay_capacity};
 use crate::shutdown::SharedShutdown;
@@ -34,6 +34,9 @@ pub struct ProcessorHandle {
     pub relay_tx: Sender<RelayMsg>,
     /// `None` when history is disabled; the pipeline drops history messages.
     pub history_tx: Option<Sender<HistoryMsg>>,
+    /// Which pipelines this instance is responsible for — gates which tables
+    /// the initial sync->live bulk replace is allowed to overwrite.
+    pub pipelines: PipelinesConfig,
 }
 
 /// Build the two bounded sink channels. Returns (handle for processor task,
@@ -50,6 +53,7 @@ pub fn channels(config: &Config) -> (ProcessorHandle, ProcessorSinks) {
         ProcessorHandle {
             relay_tx,
             history_tx,
+            pipelines: config.pipelines.clone(),
         },
         ProcessorSinks {
             relay_rx,

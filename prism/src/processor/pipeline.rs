@@ -51,79 +51,97 @@ pub async fn handle(
     let region = state.region(region_id);
 
     // First Live update after syncing → emit bulk Replace for the full
-    // accumulated snapshot, then switch to delta mode.
+    // accumulated snapshot, then switch to delta mode. Only pipelines this
+    // instance actually subscribes to have accumulated real data — an
+    // instance running a subset of pipelines (e.g. crafts-only) never
+    // received rows for the others, so replacing those tables here would
+    // wipe out data owned by other instances sharing the same relay.
     if !region.is_live {
         region.is_live = true;
+        let pipelines = &sinks.pipelines;
         let timestamp_micros = event_timestamp_micros(&reducer);
-        let res = region.snapshot_resources(region_id);
-        let growth = region.snapshot_growth_timers(region_id);
-        let enemy = region.snapshot_enemies(region_id);
-        let play = region.snapshot_players(region_id);
-        let player_states = region.snapshot_player_states(region_id);
-        let recipe_rows = region.snapshot_recipe_meta();
-        let crafts = region.snapshot_crafts(region_id, timestamp_micros);
-        let claim_meta = region.snapshot_claim_meta(region_id);
-        let claim_info = region.snapshot_claim_info(region_id);
-        let claim_supply = region.snapshot_claim_supply(region_id);
-        let history_recipe_rows = recipe_rows.clone();
-        let history_crafts = crafts.clone();
+
+        let mut relay_msgs = Vec::new();
+        let mut history_msgs = Vec::new();
+        let mut counts = Vec::new();
+
+        if pipelines.resources {
+            let res = region.snapshot_resources(region_id);
+            counts.push(format!("resources={}", res.len()));
+            relay_msgs.push(RelayMsg::ReplaceResources {
+                region_id,
+                rows: res,
+            });
+        }
+        if pipelines.growth_timers {
+            let growth = region.snapshot_growth_timers(region_id);
+            counts.push(format!("growth_timers={}", growth.len()));
+            relay_msgs.push(RelayMsg::ReplaceGrowthTimers {
+                region_id,
+                rows: growth,
+            });
+        }
+        if pipelines.enemies {
+            let enemy = region.snapshot_enemies(region_id);
+            counts.push(format!("enemies={}", enemy.len()));
+            relay_msgs.push(RelayMsg::ReplaceEnemies {
+                region_id,
+                rows: enemy,
+            });
+        }
+        if pipelines.players {
+            let play = region.snapshot_players(region_id);
+            let player_states = region.snapshot_player_states(region_id);
+            counts.push(format!(
+                "players={} player_states={}",
+                play.len(),
+                player_states.len()
+            ));
+            relay_msgs.push(RelayMsg::ReplacePlayers {
+                region_id,
+                rows: play,
+            });
+            relay_msgs.push(RelayMsg::ReplacePlayerStates {
+                region_id,
+                rows: player_states,
+            });
+        }
+        if pipelines.crafts {
+            let recipe_rows = region.snapshot_recipe_meta();
+            let crafts = region.snapshot_crafts(region_id, timestamp_micros);
+            counts.push(format!(
+                "recipes={} crafts={}",
+                recipe_rows.len(),
+                crafts.len()
+            ));
+            history_msgs.push(HistoryMsg::UpsertRecipeMeta(recipe_rows.clone()));
+            history_msgs.push(HistoryMsg::UpsertCrafts(crafts.clone()));
+            relay_msgs.push(RelayMsg::ReplaceCrafts {
+                region_id,
+                recipe_rows,
+                rows: crafts,
+            });
+        }
+        if pipelines.claims {
+            let claim_meta = region.snapshot_claim_meta(region_id);
+            let claim_info = region.snapshot_claim_info(region_id);
+            let claim_supply = region.snapshot_claim_supply(region_id);
+            counts.push(format!("claims={}", claim_meta.len()));
+            relay_msgs.push(RelayMsg::ReplaceClaims {
+                region_id,
+                meta_rows: claim_meta,
+                info_rows: claim_info,
+                supply_rows: claim_supply,
+            });
+        }
+
         info!(
-            "initial snapshot ready — emitting bulk replace: region_id={} resources={} growth_timers={} enemies={} players={} player_states={} recipes={} crafts={} claims={}",
+            "initial snapshot ready — emitting bulk replace: region_id={} {}",
             region_id,
-            res.len(),
-            growth.len(),
-            enemy.len(),
-            play.len(),
-            player_states.len(),
-            recipe_rows.len(),
-            crafts.len(),
-            claim_meta.len(),
+            counts.join(" "),
         );
-        send_relay(
-            &sinks.relay_tx,
-            [
-                RelayMsg::ReplaceResources {
-                    region_id,
-                    rows: res,
-                },
-                RelayMsg::ReplaceGrowthTimers {
-                    region_id,
-                    rows: growth,
-                },
-                RelayMsg::ReplaceEnemies {
-                    region_id,
-                    rows: enemy,
-                },
-                RelayMsg::ReplacePlayers {
-                    region_id,
-                    rows: play,
-                },
-                RelayMsg::ReplacePlayerStates {
-                    region_id,
-                    rows: player_states,
-                },
-                RelayMsg::ReplaceCrafts {
-                    region_id,
-                    recipe_rows,
-                    rows: crafts,
-                },
-                RelayMsg::ReplaceClaims {
-                    region_id,
-                    meta_rows: claim_meta,
-                    info_rows: claim_info,
-                    supply_rows: claim_supply,
-                },
-            ]
-            .into_iter(),
-        );
-        send_history(
-            &sinks.history_tx,
-            [
-                HistoryMsg::UpsertRecipeMeta(history_recipe_rows),
-                HistoryMsg::UpsertCrafts(history_crafts),
-            ]
-            .into_iter(),
-        );
+        send_relay(&sinks.relay_tx, relay_msgs.into_iter());
+        send_history(&sinks.history_tx, history_msgs.into_iter());
         // We still skip initial player-location samples because initial
         // subscription rows can be stale (e.g. offline player locations).
         // Craft/recipe state is mirrored above from the initial snapshot.
