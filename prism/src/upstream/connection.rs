@@ -319,8 +319,8 @@ async fn run_dump_schedule(
         );
 
         // Open a short-lived connection purely for this dump.
-        let dump_start = std::sync::Arc::new(std::sync::Mutex::new(None::<std::time::Instant>));
-        let dump_start_write = std::sync::Arc::clone(&dump_start);
+        let dump_start = Arc::new(std::sync::Mutex::new(None::<std::time::Instant>));
+        let dump_start_write = Arc::clone(&dump_start);
         let (cache_tx, mut cache_rx) = unbounded_channel::<DbUpdate>();
         let tables_for_connect = cfg.tables.clone();
         let module_for_log = module_name.clone();

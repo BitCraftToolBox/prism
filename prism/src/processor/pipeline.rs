@@ -17,6 +17,7 @@ use crate::relay::{
 use crate::upstream::{Phase, RegionUpdate};
 use anyhow::Result;
 use log::{debug, info};
+use metrics::counter;
 use std::collections::HashSet;
 use upstream_bindings::region::DbUpdate;
 
@@ -163,10 +164,7 @@ pub async fn handle(
 // Join-map updates (always run, regardless of phase)
 // ---------------------------------------------------------------------------
 
-fn update_join_maps(
-    region: &mut super::join::RegionJoinState,
-    update: &upstream_bindings::region::DbUpdate,
-) {
+fn update_join_maps(region: &mut super::join::RegionJoinState, update: &DbUpdate) {
     let live = region.is_live;
 
     // Claim auxiliary-building & research caches are needed in both phases to
@@ -373,13 +371,78 @@ fn update_join_maps(
 // Delta emission (Live phase only)
 // ---------------------------------------------------------------------------
 
+/// Records message- and row-level counters for one table's slice of a Live
+/// delta batch. A no-op if the table has no inserts/deletes this batch.
+fn record_table_counts(region: &str, table: &'static str, inserts: usize, deletes: usize) {
+    if inserts == 0 && deletes == 0 {
+        return;
+    }
+    counter!("prism_upstream_table_messages_total", "region" => region.to_string(), "table" => table)
+        .increment(1);
+    if inserts > 0 {
+        counter!(
+            "prism_upstream_table_rows_total",
+            "region" => region.to_string(), "table" => table, "operation" => "insert"
+        )
+        .increment(inserts as u64);
+    }
+    if deletes > 0 {
+        counter!(
+            "prism_upstream_table_rows_total",
+            "region" => region.to_string(), "table" => table, "operation" => "delete"
+        )
+        .increment(deletes as u64);
+    }
+}
+
+/// Emits message/row counters for every table this pipeline consumes from a
+/// Live-phase delta batch (see [`update_join_maps`] and [`emit_deltas`]).
+macro_rules! record_all_table_counts {
+    ($region_id:expr, $update:expr, [$($table:ident),+ $(,)?]) => {{
+        let region = $region_id.to_string();
+        $(
+            record_table_counts(
+                &region,
+                stringify!($table),
+                $update.$table.inserts.len(),
+                $update.$table.deletes.len(),
+            );
+        )+
+    }};
+}
+
 fn emit_deltas(
     region_id: u8,
-    update: &upstream_bindings::region::DbUpdate,
+    update: &DbUpdate,
     reducer: &upstream_bindings::sdk::Event<upstream_bindings::region::Reducer>,
     region: &super::join::RegionJoinState,
     sinks: &ProcessorHandle,
 ) {
+    record_all_table_counts!(
+        region_id,
+        update,
+        [
+            resource_state,
+            location_state,
+            growth_state,
+            mobile_entity_state,
+            enemy_state,
+            player_username_state,
+            signed_in_player_state,
+            crafting_recipe_desc,
+            public_progressive_action_state,
+            progressive_action_state,
+            claim_state,
+            claim_local_state,
+            claim_tech_state,
+            bank_state,
+            marketplace_state,
+            waystone_state,
+            building_state,
+            user_state,
+        ]
+    );
+
     let mut resource_upserts: Vec<ResourceRow> = Vec::new();
     let mut resource_deletes: Vec<u64> = Vec::new();
     let mut enemy_upserts: Vec<EnemyRow> = Vec::new();
