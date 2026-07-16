@@ -4,48 +4,50 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
-use super::claim_info_type::ClaimInfo;
+use super::claim_info_update_type::ClaimInfoUpdate;
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub(super) struct UpsertClaimInfoArgs {
-    pub rows: Vec<ClaimInfo>,
+pub(super) struct UpdateClaimInfoArgs {
+    pub updates: Vec<ClaimInfoUpdate>,
 }
 
-impl From<UpsertClaimInfoArgs> for super::Reducer {
-    fn from(args: UpsertClaimInfoArgs) -> Self {
-        Self::UpsertClaimInfo { rows: args.rows }
+impl From<UpdateClaimInfoArgs> for super::Reducer {
+    fn from(args: UpdateClaimInfoArgs) -> Self {
+        Self::UpdateClaimInfo {
+            updates: args.updates,
+        }
     }
 }
 
-impl __sdk::InModule for UpsertClaimInfoArgs {
+impl __sdk::InModule for UpdateClaimInfoArgs {
     type Module = super::RemoteModule;
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `upsert_claim_info`.
+/// Extension trait for access to the reducer `update_claim_info`.
 ///
 /// Implemented for [`super::RemoteReducers`].
-pub trait upsert_claim_info {
-    /// Request that the remote module invoke the reducer `upsert_claim_info` to run as soon as possible.
+pub trait update_claim_info {
+    /// Request that the remote module invoke the reducer `update_claim_info` to run as soon as possible.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`upsert_claim_info:upsert_claim_info_then`] to run a callback after the reducer completes.
-    fn upsert_claim_info(&self, rows: Vec<ClaimInfo>) -> __sdk::Result<()> {
-        self.upsert_claim_info_then(rows, |_, _| {})
+    /// /// Use [`update_claim_info:update_claim_info_then`] to run a callback after the reducer completes.
+    fn update_claim_info(&self, updates: Vec<ClaimInfoUpdate>) -> __sdk::Result<()> {
+        self.update_claim_info_then(updates, |_, _| {})
     }
 
-    /// Request that the remote module invoke the reducer `upsert_claim_info` to run as soon as possible,
+    /// Request that the remote module invoke the reducer `update_claim_info` to run as soon as possible,
     /// registering `callback` to run when we are notified that the reducer completed.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and its status can be observed with the `callback`.
-    fn upsert_claim_info_then(
+    fn update_claim_info_then(
         &self,
-        rows: Vec<ClaimInfo>,
+        updates: Vec<ClaimInfoUpdate>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -53,16 +55,16 @@ pub trait upsert_claim_info {
     ) -> __sdk::Result<()>;
 }
 
-impl upsert_claim_info for super::RemoteReducers {
-    fn upsert_claim_info_then(
+impl update_claim_info for super::RemoteReducers {
+    fn update_claim_info_then(
         &self,
-        rows: Vec<ClaimInfo>,
+        updates: Vec<ClaimInfoUpdate>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp
-            .invoke_reducer_with_callback(UpsertClaimInfoArgs { rows }, callback)
+            .invoke_reducer_with_callback(UpdateClaimInfoArgs { updates }, callback)
     }
 }

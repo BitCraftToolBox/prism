@@ -16,7 +16,7 @@ pub struct ClaimMeta {
     pub building_desc_id: i32,
 }
 
-/// Which auxiliary buildings a claim has plus its learned research.
+/// Map info about claims which may change infrequently during runtime.
 /// Upserted incrementally during the live phase.
 #[table(accessor = claim_info, public,
     index(accessor = by_region, btree(columns = [region_id])),
@@ -30,6 +30,7 @@ pub struct ClaimInfo {
     pub marketplace: bool,
     pub waystone: bool,
     pub research: Vec<i32>,
+    pub name: String,
 }
 
 /// Frequently-updated per-claim supply/upkeep numbers.

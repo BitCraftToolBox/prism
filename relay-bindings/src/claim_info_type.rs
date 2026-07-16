@@ -13,6 +13,7 @@ pub struct ClaimInfo {
     pub marketplace: bool,
     pub waystone: bool,
     pub research: Vec<i32>,
+    pub name: String,
 }
 
 impl __sdk::InModule for ClaimInfo {
@@ -29,6 +30,7 @@ pub struct ClaimInfoCols {
     pub marketplace: __sdk::__query_builder::Col<ClaimInfo, bool>,
     pub waystone: __sdk::__query_builder::Col<ClaimInfo, bool>,
     pub research: __sdk::__query_builder::Col<ClaimInfo, Vec<i32>>,
+    pub name: __sdk::__query_builder::Col<ClaimInfo, String>,
 }
 
 impl __sdk::__query_builder::HasCols for ClaimInfo {
@@ -41,6 +43,7 @@ impl __sdk::__query_builder::HasCols for ClaimInfo {
             marketplace: __sdk::__query_builder::Col::new(table_name, "marketplace"),
             waystone: __sdk::__query_builder::Col::new(table_name, "waystone"),
             research: __sdk::__query_builder::Col::new(table_name, "research"),
+            name: __sdk::__query_builder::Col::new(table_name, "name"),
         }
     }
 }

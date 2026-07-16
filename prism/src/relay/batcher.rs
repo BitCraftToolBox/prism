@@ -22,9 +22,10 @@ use anyhow::Result;
 use log::{debug, error, info, warn};
 use metrics::{counter, histogram};
 use relay_bindings::{
-    ClaimInfo, ClaimMeta, ClaimSupply, CraftContributionDelta, CraftPublicUpdate, CraftUpdate,
-    EnemyLocation, GrowthTimerUpdate, HerdLocation, MobileMoveUpdate, PlayerLocation,
-    PlayerRenameUpdate, PlayerState, RecipeMeta, ResourceLocation,
+    ClaimInfo, ClaimInfoField as BindingsClaimInfoField,
+    ClaimInfoUpdate as BindingsClaimInfoUpdate, ClaimMeta, ClaimSupply, CraftContributionDelta,
+    CraftPublicUpdate, CraftUpdate, EnemyLocation, GrowthTimerUpdate, HerdLocation, MobileMoveUpdate,
+    PlayerLocation, PlayerRenameUpdate, PlayerState, RecipeMeta, ResourceLocation,
 };
 use relay_sdk::Timestamp;
 use tokio::sync::mpsc::Receiver;
@@ -32,9 +33,10 @@ use tokio::time::{Instant, interval_at};
 
 use super::connection::{RECONNECT_DELAY, RelayConnection};
 use super::{
-    ClaimInfoRow, ClaimMetaRow, ClaimSupplyRow, CraftContributionDeltaRow, CraftPublicUpdateRow,
-    CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, MobileMoveRow, PlayerRenameRow, PlayerRow,
-    PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow,
+    ClaimInfoField, ClaimInfoRow, ClaimInfoUpdate, ClaimMetaRow, ClaimSupplyRow,
+    CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow,
+    HerdRow, MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RelayMsg,
+    ResourceRow,
 };
 use crate::config::{Config, RelayConfig};
 use crate::shutdown::SharedShutdown;
@@ -79,7 +81,7 @@ struct Batches {
     craft_public_updates: Vec<CraftPublicUpdate>,
     craft_progress_deltas: Vec<CraftContributionDelta>,
     craft_expiry_ids: Vec<u64>,
-    claim_info_upserts: Vec<ClaimInfo>,
+    claim_info_updates: Vec<BindingsClaimInfoUpdate>,
     claim_supply_upserts: Vec<ClaimSupply>,
     claim_deletes: Vec<u64>,
 }
@@ -200,10 +202,28 @@ fn to_claim_info(r: &ClaimInfoRow) -> ClaimInfo {
     ClaimInfo {
         entity_id: r.entity_id,
         region_id: r.region_id,
+        name: r.name.clone(),
         bank: r.bank,
         marketplace: r.marketplace,
         waystone: r.waystone,
         research: r.research.clone(),
+    }
+}
+fn to_claim_info_field(f: &ClaimInfoField) -> BindingsClaimInfoField {
+    match f {
+        ClaimInfoField::Name(name) => BindingsClaimInfoField::Name(name.clone()),
+        ClaimInfoField::Bank(bank) => BindingsClaimInfoField::Bank(*bank),
+        ClaimInfoField::Marketplace(marketplace) => {
+            BindingsClaimInfoField::Marketplace(*marketplace)
+        }
+        ClaimInfoField::Waystone(waystone) => BindingsClaimInfoField::Waystone(*waystone),
+        ClaimInfoField::Research(research) => BindingsClaimInfoField::Research(research.clone()),
+    }
+}
+fn to_claim_info_update(r: &ClaimInfoUpdate) -> BindingsClaimInfoUpdate {
+    BindingsClaimInfoUpdate {
+        entity_id: r.entity_id,
+        field: to_claim_info_field(&r.field),
     }
 }
 fn to_claim_supply(r: &ClaimSupplyRow) -> ClaimSupply {
@@ -508,9 +528,9 @@ pub async fn run(
                         batches.craft_expiry_ids.extend(craft_ids);
                         if batches.craft_expiry_ids.len() >= MAX_BATCH { flush_craft_batch(&conn, &mut batches); }
                     }
-                    RelayMsg::UpsertClaimInfo(rows) => {
-                        batches.claim_info_upserts.extend(rows.iter().map(to_claim_info));
-                        if batches.claim_info_upserts.len() >= MAX_BATCH { flush_claim_batch(&conn, &mut batches); }
+                    RelayMsg::UpdateClaimInfo(rows) => {
+                        batches.claim_info_updates.extend(rows.iter().map(to_claim_info_update));
+                        if batches.claim_info_updates.len() >= MAX_BATCH { flush_claim_batch(&conn, &mut batches); }
                     }
                     RelayMsg::UpsertClaimSupply(rows) => {
                         batches.claim_supply_upserts.extend(rows.iter().map(to_claim_supply));
@@ -586,7 +606,7 @@ pub async fn run(
             _ = claim_tick.tick() => {
                 if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
                 histogram!("prism_relay_batch_depth", "pipeline" => "claim")
-                    .record((batches.claim_info_upserts.len()
+                    .record((batches.claim_info_updates.len()
                         + batches.claim_supply_upserts.len()
                         + batches.claim_deletes.len()) as f64);
                 let t = std::time::Instant::now();
@@ -879,14 +899,14 @@ fn flush_craft_batch(conn: &RelayConnection, batches: &mut Batches) {
 }
 
 fn flush_claim_batch(conn: &RelayConnection, batches: &mut Batches) {
-    // Upserts before deletes so a delete in the same window always wins.
-    if !batches.claim_info_upserts.is_empty() {
-        let rows = std::mem::take(&mut batches.claim_info_upserts);
-        debug!("relay flush: upsert_claim_info count={}", rows.len());
+    // Updates before deletes so a delete in the same window always wins.
+    if !batches.claim_info_updates.is_empty() {
+        let rows = std::mem::take(&mut batches.claim_info_updates);
+        debug!("relay flush: update_claim_info count={}", rows.len());
         counter!("prism_relay_flush_rows_total", "pipeline" => "claim", "op" => "info")
             .increment(rows.len() as u64);
-        if let Err(e) = conn.upsert_claim_info(rows) {
-            warn!("relay: upsert_claim_info: {e:?}");
+        if let Err(e) = conn.update_claim_info(rows) {
+            warn!("relay: update_claim_info: {e:?}");
         }
     }
     if !batches.claim_supply_upserts.is_empty() {

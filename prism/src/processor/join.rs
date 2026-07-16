@@ -67,17 +67,23 @@ pub struct RegionJoinState {
     /// Sync-phase only (rebuilt from the batch in live phase); cleared by
     /// clear_live_caches.
     pub claim_local: HashMap<u64, ClaimLocalData>,
-    /// claim entity_id -> learned research tech ids.
-    ///
-    /// Unlike the other claim caches this is **kept alive in the live phase**:
-    /// a ClaimInfo row bundles bank/marketplace/waystone/research together, so
-    /// when any one changes we need the others to emit a coherent upsert.
+    /// claim entity_id -> name (sync phase only; cleared by clear_live_caches).
+    /// Live-phase renames are emitted as targeted ClaimInfo field updates
+    /// directly from the update batch, so no cache is needed once live.
+    pub claim_names: HashMap<u64, String>,
+    /// claim entity_id -> learned research tech ids (sync phase only; cleared
+    /// by clear_live_caches). Only needed to build the initial coherent
+    /// ClaimInfo snapshot; live-phase changes are emitted as targeted field
+    /// updates directly from the update batch.
     pub claim_research: HashMap<u64, Vec<i32>>,
-    /// claim entity_ids that currently have a bank (kept alive in live phase).
+    /// claim entity_ids that currently have a bank (sync phase only; cleared
+    /// by clear_live_caches).
     pub claim_banks: HashSet<u64>,
-    /// claim entity_ids that currently have a marketplace (kept alive in live phase).
+    /// claim entity_ids that currently have a marketplace (sync phase only;
+    /// cleared by clear_live_caches).
     pub claim_marketplaces: HashSet<u64>,
-    /// claim entity_ids that currently have a waystone (kept alive in live phase).
+    /// claim entity_ids that currently have a waystone (sync phase only;
+    /// cleared by clear_live_caches).
     pub claim_waystones: HashSet<u64>,
 }
 
@@ -332,6 +338,7 @@ impl RegionJoinState {
             .map(|&eid| ClaimInfoRow {
                 entity_id: eid,
                 region_id,
+                name: self.claim_names.get(&eid).cloned().unwrap_or_default(),
                 bank: self.claim_banks.contains(&eid),
                 marketplace: self.claim_marketplaces.contains(&eid),
                 waystone: self.claim_waystones.contains(&eid),
@@ -353,24 +360,6 @@ impl RegionJoinState {
                 building_maintenance: data.building_maintenance,
             })
             .collect()
-    }
-
-    /// Build a coherent ClaimInfo row for a single claim from the currently
-    /// tracked caches. Used in the live phase when an auxiliary building or
-    /// research changes.
-    pub fn claim_info_row(&self, entity_id: u64, region_id: u8) -> ClaimInfoRow {
-        ClaimInfoRow {
-            entity_id,
-            region_id,
-            bank: self.claim_banks.contains(&entity_id),
-            marketplace: self.claim_marketplaces.contains(&entity_id),
-            waystone: self.claim_waystones.contains(&entity_id),
-            research: self
-                .claim_research
-                .get(&entity_id)
-                .cloned()
-                .unwrap_or_default(),
-        }
     }
 
     /// Drop all sync-phase caches and initialize live-phase state.
@@ -398,11 +387,17 @@ impl RegionJoinState {
         // claim_local is only needed to build the snapshot; live-phase
         // ClaimSupply/ClaimMeta rows are derived directly from update batches.
         self.claim_local = HashMap::default();
-        // claim_research / claim_banks / claim_marketplaces / claim_waystones
-        // are intentionally retained: live-phase ClaimInfo upserts need the
-        // full set of flags to emit a coherent row.
-        //
-        // resource_desc_tags is likewise retained: the live phase reads it to
+        // claim_names / claim_research / claim_banks / claim_marketplaces /
+        // claim_waystones are only needed to build the initial coherent
+        // ClaimInfo snapshot; live-phase changes are emitted as targeted
+        // field updates derived directly from update batches.
+        self.claim_names = HashMap::default();
+        self.claim_research = HashMap::default();
+        self.claim_banks = HashSet::default();
+        self.claim_marketplaces = HashSet::default();
+        self.claim_waystones = HashSet::default();
+
+        // resource_desc_tags is retained: the live phase reads it to
         // decide which newly-inserted resources warrant a growth-timer sub.
         //
         // enemy_ai_type_map is likewise retained: the live phase needs it to
