@@ -9,8 +9,8 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use log::{info, warn};
 use relay_bindings::{
-    ClaimInfo, ClaimMeta, ClaimSupply, CraftContributionDelta, CraftPublicUpdate, CraftUpdate,
-    DbConnection, EnemyLocation, GrowthTimerUpdate, HerdLocation, MobileMoveUpdate, PlayerLocation,
+    ClaimInfo, ClaimInfoUpdate, ClaimMeta, ClaimSupply, CraftContributionDelta, CraftPublicUpdate,
+    CraftUpdate, DbConnection, EnemyLocation, GrowthTimerUpdate, HerdLocation, MobileMoveUpdate, PlayerLocation,
     PlayerRenameUpdate, PlayerState, RecipeMeta, ResourceLocation,
     apply_craft_progress_deltas_reducer::apply_craft_progress_deltas,
     bulk_replace_claims_reducer::bulk_replace_claims,
@@ -28,10 +28,9 @@ use relay_bindings::{
     schedule_craft_expiry_reducer::schedule_craft_expiry,
     set_players_offline_reducer::set_players_offline,
     set_players_online_reducer::set_players_online, toggle_public_reducer::toggle_public,
-    upsert_claim_info_reducer::upsert_claim_info, upsert_claim_supply_reducer::upsert_claim_supply,
-    upsert_crafts_reducer::upsert_crafts, upsert_herds_reducer::upsert_herds,
-    upsert_player_states_reducer::upsert_player_states, upsert_players_reducer::upsert_players,
-    upsert_recipe_meta_reducer::upsert_recipe_meta,
+    update_claim_info_reducer::update_claim_info, upsert_claim_supply_reducer::upsert_claim_supply,
+    upsert_crafts_reducer::upsert_crafts, upsert_herds_reducer::upsert_herds, upsert_player_states_reducer::upsert_player_states,
+    upsert_players_reducer::upsert_players, upsert_recipe_meta_reducer::upsert_recipe_meta,
 };
 use relay_sdk::DbContext;
 use tokio::sync::oneshot;
@@ -346,10 +345,10 @@ impl RelayConnection {
             .map_err(|e| anyhow!("{e:?}"))
     }
 
-    pub fn upsert_claim_info(&self, rows: Vec<ClaimInfo>) -> Result<()> {
+    pub fn update_claim_info(&self, rows: Vec<ClaimInfoUpdate>) -> Result<()> {
         self.conn
             .reducers
-            .upsert_claim_info(rows)
+            .update_claim_info(rows)
             .map_err(|e| anyhow!("{e:?}"))
     }
 

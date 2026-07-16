@@ -13,8 +13,10 @@ pub mod bulk_replace_herds_reducer;
 pub mod bulk_replace_player_states_reducer;
 pub mod bulk_replace_players_reducer;
 pub mod bulk_replace_resources_reducer;
+pub mod claim_info_field_type;
 pub mod claim_info_table;
 pub mod claim_info_type;
+pub mod claim_info_update_type;
 pub mod claim_meta_table;
 pub mod claim_meta_type;
 pub mod claim_supply_table;
@@ -64,7 +66,7 @@ pub mod schedule_craft_expiry_reducer;
 pub mod set_players_offline_reducer;
 pub mod set_players_online_reducer;
 pub mod toggle_public_reducer;
-pub mod upsert_claim_info_reducer;
+pub mod update_claim_info_reducer;
 pub mod upsert_claim_supply_reducer;
 pub mod upsert_crafts_reducer;
 pub mod upsert_herds_reducer;
@@ -79,8 +81,10 @@ pub use bulk_replace_herds_reducer::bulk_replace_herds;
 pub use bulk_replace_player_states_reducer::bulk_replace_player_states;
 pub use bulk_replace_players_reducer::bulk_replace_players;
 pub use bulk_replace_resources_reducer::bulk_replace_resources;
+pub use claim_info_field_type::ClaimInfoField;
 pub use claim_info_table::*;
 pub use claim_info_type::ClaimInfo;
+pub use claim_info_update_type::ClaimInfoUpdate;
 pub use claim_meta_table::*;
 pub use claim_meta_type::ClaimMeta;
 pub use claim_supply_table::*;
@@ -130,7 +134,7 @@ pub use schedule_craft_expiry_reducer::schedule_craft_expiry;
 pub use set_players_offline_reducer::set_players_offline;
 pub use set_players_online_reducer::set_players_online;
 pub use toggle_public_reducer::toggle_public;
-pub use upsert_claim_info_reducer::upsert_claim_info;
+pub use update_claim_info_reducer::update_claim_info;
 pub use upsert_claim_supply_reducer::upsert_claim_supply;
 pub use upsert_crafts_reducer::upsert_crafts;
 pub use upsert_herds_reducer::upsert_herds;
@@ -229,8 +233,8 @@ pub enum Reducer {
     TogglePublic {
         updates: Vec<CraftPublicUpdate>,
     },
-    UpsertClaimInfo {
-        rows: Vec<ClaimInfo>,
+    UpdateClaimInfo {
+        updates: Vec<ClaimInfoUpdate>,
     },
     UpsertClaimSupply {
         rows: Vec<ClaimSupply>,
@@ -283,7 +287,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SetPlayersOffline { .. } => "set_players_offline",
             Reducer::SetPlayersOnline { .. } => "set_players_online",
             Reducer::TogglePublic { .. } => "toggle_public",
-            Reducer::UpsertClaimInfo { .. } => "upsert_claim_info",
+            Reducer::UpdateClaimInfo { .. } => "update_claim_info",
             Reducer::UpsertClaimSupply { .. } => "upsert_claim_supply",
             Reducer::UpsertCrafts { .. } => "upsert_crafts",
             Reducer::UpsertHerds { .. } => "upsert_herds",
@@ -440,9 +444,9 @@ impl __sdk::Reducer for Reducer {
                     updates: updates.clone(),
                 })
             }
-            Reducer::UpsertClaimInfo { rows } => {
-                __sats::bsatn::to_vec(&upsert_claim_info_reducer::UpsertClaimInfoArgs {
-                    rows: rows.clone(),
+            Reducer::UpdateClaimInfo { updates } => {
+                __sats::bsatn::to_vec(&update_claim_info_reducer::UpdateClaimInfoArgs {
+                    updates: updates.clone(),
                 })
             }
             Reducer::UpsertClaimSupply { rows } => {

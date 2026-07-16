@@ -1,4 +1,4 @@
-//! Pipeline-specific transforms: turn a [`RegionUpdate`] into sink messages.
+﻿//! Pipeline-specific transforms: turn a [`RegionUpdate`] into sink messages.
 //!
 //! During the initial subscription sync (Phase::Syncing) updates flow in as
 //! the server sends the initial snapshot rows, but not all pipelines have
@@ -13,15 +13,15 @@ use super::join::{
 };
 use crate::history::HistoryMsg;
 use crate::relay::{
-    ClaimInfoRow, ClaimSupplyRow, CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow,
-    EnemyRow, GrowthTimerRow, HerdRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RelayMsg,
-    ResourceRow,
+    ClaimInfoField, ClaimInfoUpdate, ClaimSupplyRow, CraftContributionDeltaRow,
+    CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, PlayerRow, PlayerStateRow,
+    RecipeMetaRow, RelayMsg, ResourceRow,
 };
 use crate::upstream::{GrowthTimerSubRequest, Phase, RegionUpdate};
 use anyhow::Result;
 use log::{debug, info};
 use metrics::counter;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use upstream_bindings::region::DbUpdate;
 
 const OVERWORLD_DIM: u32 = 1;
@@ -192,10 +192,9 @@ pub async fn handle(
 fn update_join_maps(region: &mut super::join::RegionJoinState, update: &DbUpdate) {
     let live = region.is_live;
 
-    // Claim auxiliary-building & research caches are needed in both phases to
-    // emit coherent ClaimInfo rows (a row bundles bank/marketplace/waystone/
-    // research together), so maintain them regardless of phase. A claim_state
-    // delete that is not immediately reinserted purges every claim cache.
+    // A claim_state delete that is not immediately reinserted purges every
+    // sync-phase claim cache. In live phase these caches are already empty
+    // (dropped by clear_live_caches), so this is a harmless no-op.
     for e in &update.claim_state.deletes {
         let eid = e.row.entity_id;
         if !update
@@ -204,38 +203,13 @@ fn update_join_maps(region: &mut super::join::RegionJoinState, update: &DbUpdate
             .iter()
             .any(|i| i.row.entity_id == eid)
         {
+            region.claim_names.remove(&eid);
             region.claim_research.remove(&eid);
             region.claim_banks.remove(&eid);
             region.claim_marketplaces.remove(&eid);
             region.claim_waystones.remove(&eid);
             region.claim_local.remove(&eid);
         }
-    }
-    for e in &update.claim_tech_state.deletes {
-        region.claim_research.remove(&e.row.entity_id);
-    }
-    for e in &update.claim_tech_state.inserts {
-        region
-            .claim_research
-            .insert(e.row.entity_id, e.row.learned.clone());
-    }
-    for e in &update.bank_state.deletes {
-        region.claim_banks.remove(&e.row.claim_entity_id);
-    }
-    for e in &update.bank_state.inserts {
-        region.claim_banks.insert(e.row.claim_entity_id);
-    }
-    for e in &update.marketplace_state.deletes {
-        region.claim_marketplaces.remove(&e.row.claim_entity_id);
-    }
-    for e in &update.marketplace_state.inserts {
-        region.claim_marketplaces.insert(e.row.claim_entity_id);
-    }
-    for e in &update.waystone_state.deletes {
-        region.claim_waystones.remove(&e.row.claim_entity_id);
-    }
-    for e in &update.waystone_state.inserts {
-        region.claim_waystones.insert(e.row.claim_entity_id);
     }
 
     // resource_desc id → tag. Maintained in both phases: it arrives during the
@@ -263,6 +237,41 @@ fn update_join_maps(region: &mut super::join::RegionJoinState, update: &DbUpdate
     }
 
     if !live {
+        // Claim auxiliary-building/research/name caches are only needed to
+        // build the initial coherent ClaimInfo snapshot at the sync→live
+        // transition; live-phase changes are emitted as targeted field
+        // updates derived directly from the update batch (see emit_deltas).
+        for e in &update.claim_state.inserts {
+            region
+                .claim_names
+                .insert(e.row.entity_id, e.row.name.clone());
+        }
+        for e in &update.claim_tech_state.deletes {
+            region.claim_research.remove(&e.row.entity_id);
+        }
+        for e in &update.claim_tech_state.inserts {
+            region
+                .claim_research
+                .insert(e.row.entity_id, e.row.learned.clone());
+        }
+        for e in &update.bank_state.deletes {
+            region.claim_banks.remove(&e.row.claim_entity_id);
+        }
+        for e in &update.bank_state.inserts {
+            region.claim_banks.insert(e.row.claim_entity_id);
+        }
+        for e in &update.marketplace_state.deletes {
+            region.claim_marketplaces.remove(&e.row.claim_entity_id);
+        }
+        for e in &update.marketplace_state.inserts {
+            region.claim_marketplaces.insert(e.row.claim_entity_id);
+        }
+        for e in &update.waystone_state.deletes {
+            region.claim_waystones.remove(&e.row.claim_entity_id);
+        }
+        for e in &update.waystone_state.inserts {
+            region.claim_waystones.insert(e.row.claim_entity_id);
+        }
         for e in &update.user_state.deletes {
             region.user_identity_map.remove(&e.row.identity);
         }
@@ -532,7 +541,7 @@ fn emit_deltas(
     let mut craft_progress_deltas: Vec<CraftContributionDeltaRow> = Vec::new();
     let mut craft_expiry_ids: Vec<u64> = Vec::new();
     let mut claim_supply_upserts: Vec<ClaimSupplyRow> = Vec::new();
-    let mut claim_info_upserts: Vec<ClaimInfoRow> = Vec::new();
+    let mut claim_info_updates: Vec<ClaimInfoUpdate> = Vec::new();
     let mut claim_deletes: Vec<u64> = Vec::new();
     let mut history_msgs: Vec<HistoryMsg> = Vec::new();
 
@@ -970,39 +979,97 @@ fn emit_deltas(
         });
     }
 
-    // ClaimInfo upserts: a change to a claim's auxiliary buildings or research
-    // requires re-emitting the whole ClaimInfo row (built from the caches that
-    // update_join_maps has already applied for this batch).
-    let mut affected_claims: HashSet<u64> = HashSet::new();
-    for e in &update.claim_tech_state.inserts {
-        affected_claims.insert(e.row.entity_id);
-    }
-    for e in &update.claim_tech_state.deletes {
-        affected_claims.insert(e.row.entity_id);
-    }
-    for e in &update.bank_state.inserts {
-        affected_claims.insert(e.row.claim_entity_id);
-    }
-    for e in &update.bank_state.deletes {
-        affected_claims.insert(e.row.claim_entity_id);
-    }
-    for e in &update.marketplace_state.inserts {
-        affected_claims.insert(e.row.claim_entity_id);
-    }
-    for e in &update.marketplace_state.deletes {
-        affected_claims.insert(e.row.claim_entity_id);
-    }
-    for e in &update.waystone_state.inserts {
-        affected_claims.insert(e.row.claim_entity_id);
-    }
-    for e in &update.waystone_state.deletes {
-        affected_claims.insert(e.row.claim_entity_id);
-    }
-    for eid in affected_claims {
+    // ClaimInfo field updates: each changed name/aux-building/research field
+    // is sent as a targeted partial update — no full-row cache needed. Within
+    // a single batch an insert always wins over a delete for the same claim,
+    // mirroring the delete-then-insert ordering update_join_maps used to
+    // apply to the (now sync-only) caches.
+    for e in &update.claim_state.inserts {
+        let eid = e.row.entity_id;
         if claim_delete_set.contains(&eid) {
             continue;
         }
-        claim_info_upserts.push(region.claim_info_row(eid, region_id));
+        let name_changed = update
+            .claim_state
+            .deletes
+            .iter()
+            .find(|d| d.row.entity_id == eid)
+            .map(|d| d.row.name != e.row.name)
+            .unwrap_or(true);
+        if name_changed {
+            claim_info_updates.push(ClaimInfoUpdate {
+                entity_id: eid,
+                field: ClaimInfoField::Name(e.row.name.clone()),
+            });
+        }
+    }
+
+    let mut claim_research_changes: HashMap<u64, Vec<i32>> = HashMap::new();
+    for e in &update.claim_tech_state.deletes {
+        claim_research_changes.insert(e.row.entity_id, Vec::new());
+    }
+    for e in &update.claim_tech_state.inserts {
+        claim_research_changes.insert(e.row.entity_id, e.row.learned.clone());
+    }
+    for (eid, research) in claim_research_changes {
+        if claim_delete_set.contains(&eid) {
+            continue;
+        }
+        claim_info_updates.push(ClaimInfoUpdate {
+            entity_id: eid,
+            field: ClaimInfoField::Research(research),
+        });
+    }
+
+    let mut claim_bank_changes: HashMap<u64, bool> = HashMap::new();
+    for e in &update.bank_state.deletes {
+        claim_bank_changes.insert(e.row.claim_entity_id, false);
+    }
+    for e in &update.bank_state.inserts {
+        claim_bank_changes.insert(e.row.claim_entity_id, true);
+    }
+    for (eid, bank) in claim_bank_changes {
+        if claim_delete_set.contains(&eid) {
+            continue;
+        }
+        claim_info_updates.push(ClaimInfoUpdate {
+            entity_id: eid,
+            field: ClaimInfoField::Bank(bank),
+        });
+    }
+
+    let mut claim_marketplace_changes: HashMap<u64, bool> = HashMap::new();
+    for e in &update.marketplace_state.deletes {
+        claim_marketplace_changes.insert(e.row.claim_entity_id, false);
+    }
+    for e in &update.marketplace_state.inserts {
+        claim_marketplace_changes.insert(e.row.claim_entity_id, true);
+    }
+    for (eid, marketplace) in claim_marketplace_changes {
+        if claim_delete_set.contains(&eid) {
+            continue;
+        }
+        claim_info_updates.push(ClaimInfoUpdate {
+            entity_id: eid,
+            field: ClaimInfoField::Marketplace(marketplace),
+        });
+    }
+
+    let mut claim_waystone_changes: HashMap<u64, bool> = HashMap::new();
+    for e in &update.waystone_state.deletes {
+        claim_waystone_changes.insert(e.row.claim_entity_id, false);
+    }
+    for e in &update.waystone_state.inserts {
+        claim_waystone_changes.insert(e.row.claim_entity_id, true);
+    }
+    for (eid, waystone) in claim_waystone_changes {
+        if claim_delete_set.contains(&eid) {
+            continue;
+        }
+        claim_info_updates.push(ClaimInfoUpdate {
+            entity_id: eid,
+            field: ClaimInfoField::Waystone(waystone),
+        });
     }
 
     send_relay(
@@ -1118,10 +1185,10 @@ fn emit_deltas(
             std::iter::once(RelayMsg::UpsertClaimSupply(claim_supply_upserts)),
         );
     }
-    if !claim_info_upserts.is_empty() {
+    if !claim_info_updates.is_empty() {
         send_relay(
             &sinks.relay_tx,
-            std::iter::once(RelayMsg::UpsertClaimInfo(claim_info_upserts)),
+            std::iter::once(RelayMsg::UpdateClaimInfo(claim_info_updates)),
         );
     }
     if !claim_deletes.is_empty() {

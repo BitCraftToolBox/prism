@@ -77,8 +77,9 @@ pub enum RelayMsg {
     ToggleCraftPublic(Vec<CraftPublicUpdateRow>),
     ApplyCraftProgressDeltas(Vec<CraftContributionDeltaRow>),
     ScheduleCraftExpiry(Vec<u64>),
-    /// Live-phase delta: upsert ClaimInfo rows (bank/marketplace/waystone/research).
-    UpsertClaimInfo(Vec<ClaimInfoRow>),
+    /// Live-phase delta: targeted field updates to existing ClaimInfo rows
+    /// (name/bank/marketplace/waystone/research), sent one field at a time.
+    UpdateClaimInfo(Vec<ClaimInfoUpdate>),
     /// Live-phase delta: upsert ClaimSupply rows (supplies/tiles/upkeep).
     UpsertClaimSupply(Vec<ClaimSupplyRow>),
     /// Live-phase delta: a claim was removed upstream; drop it from all tables.
@@ -216,10 +217,29 @@ pub struct ClaimMetaRow {
 pub struct ClaimInfoRow {
     pub entity_id: u64,
     pub region_id: u8,
+    pub name: String,
     pub bank: bool,
     pub marketplace: bool,
     pub waystone: bool,
     pub research: Vec<i32>,
+}
+
+/// A single field of a `ClaimInfo` row that can change independently of the
+/// others (name, bank/marketplace/waystone presence, learned research).
+#[derive(Debug, Clone)]
+pub enum ClaimInfoField {
+    Name(String),
+    Bank(bool),
+    Marketplace(bool),
+    Waystone(bool),
+    Research(Vec<i32>),
+}
+
+/// A targeted update to one field of an existing ClaimInfo row.
+#[derive(Debug, Clone)]
+pub struct ClaimInfoUpdate {
+    pub entity_id: u64,
+    pub field: ClaimInfoField,
 }
 
 #[derive(Debug, Clone)]

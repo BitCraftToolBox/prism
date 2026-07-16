@@ -2,7 +2,7 @@ use crate::reducers::ensure_relay;
 use crate::tables::claims::{
     ClaimInfo, ClaimMeta, ClaimSupply, claim_info, claim_meta, claim_supply,
 };
-use spacetimedb::{ReducerContext, Table, reducer};
+use spacetimedb::{ReducerContext, SpacetimeType, Table, reducer};
 
 /// Replace the entire claim state for a region in one transaction. Used on the
 /// sync→live transition to publish a fresh, coherent snapshot: all three claim
@@ -38,13 +38,42 @@ pub fn bulk_replace_claims(
     Ok(())
 }
 
-/// Live-phase: upsert ClaimInfo rows (bank/marketplace/waystone presence and
-/// learned research) for claims whose auxiliary buildings or tech changed.
+/// A single field of a `claim_info` row that can change independently of the
+/// others (name, bank/marketplace/waystone presence, learned research).
+#[derive(SpacetimeType)]
+pub enum ClaimInfoField {
+    Name(String),
+    Bank(bool),
+    Marketplace(bool),
+    Waystone(bool),
+    Research(Vec<i32>),
+}
+
+/// A targeted update to one field of an existing `claim_info` row.
+#[derive(SpacetimeType)]
+pub struct ClaimInfoUpdate {
+    pub entity_id: u64,
+    pub field: ClaimInfoField,
+}
+
+/// Live-phase: apply targeted field updates to `claim_info` rows. No-ops for
+/// entity_ids not already present (rows are created by `bulk_replace_claims`
+/// on the sync→live transition).
 #[reducer]
-pub fn upsert_claim_info(ctx: &ReducerContext, rows: Vec<ClaimInfo>) -> Result<(), String> {
+pub fn update_claim_info(ctx: &ReducerContext, updates: Vec<ClaimInfoUpdate>) -> Result<(), String> {
     ensure_relay(ctx)?;
-    for row in rows {
-        ctx.db.claim_info().entity_id().insert_or_update(row);
+    for update in updates {
+        let Some(mut row) = ctx.db.claim_info().entity_id().find(update.entity_id) else {
+            continue;
+        };
+        match update.field {
+            ClaimInfoField::Name(name) => row.name = name,
+            ClaimInfoField::Bank(bank) => row.bank = bank,
+            ClaimInfoField::Marketplace(marketplace) => row.marketplace = marketplace,
+            ClaimInfoField::Waystone(waystone) => row.waystone = waystone,
+            ClaimInfoField::Research(research) => row.research = research,
+        }
+        ctx.db.claim_info().entity_id().update(row);
     }
     Ok(())
 }
