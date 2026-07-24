@@ -27,6 +27,7 @@ use __sats::serde::SerdeWrapper;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SupportedTable {
     BiomeDesc,
+    ResourceDesc,
     PavingTileDesc,
     TerrainChunkState,
     PavedTileState,
@@ -48,6 +49,7 @@ impl SupportedTable {
     pub fn as_str(self) -> &'static str {
         match self {
             SupportedTable::BiomeDesc => "biome_desc",
+            SupportedTable::ResourceDesc => "resource_desc",
             SupportedTable::PavingTileDesc => "paving_tile_desc",
             SupportedTable::TerrainChunkState => "terrain_chunk_state",
             SupportedTable::PavedTileState => "paved_tile_state",
@@ -68,6 +70,7 @@ impl SupportedTable {
     /// All supported tables. Used for validation and documentation.
     pub const ALL: &'static [SupportedTable] = &[
         SupportedTable::BiomeDesc,
+        SupportedTable::ResourceDesc,
         SupportedTable::PavingTileDesc,
         SupportedTable::TerrainChunkState,
         SupportedTable::PavedTileState,
@@ -98,6 +101,7 @@ impl SupportedTable {
 pub fn has_inserts(update: &DbUpdate, table: SupportedTable) -> bool {
     match table {
         SupportedTable::BiomeDesc => !update.biome_desc.inserts.is_empty(),
+        SupportedTable::ResourceDesc => !update.resource_desc.inserts.is_empty(),
         SupportedTable::PavingTileDesc => !update.paving_tile_desc.inserts.is_empty(),
         SupportedTable::TerrainChunkState => !update.terrain_chunk_state.inserts.is_empty(),
         SupportedTable::PavedTileState => !update.paved_tile_state.inserts.is_empty(),
@@ -120,6 +124,7 @@ pub fn has_inserts(update: &DbUpdate, table: SupportedTable) -> bool {
 pub fn extract_rows_json(update: &DbUpdate, table: SupportedTable) -> Vec<Value> {
     match table {
         SupportedTable::BiomeDesc => serialize(&update.biome_desc),
+        SupportedTable::ResourceDesc => serialize(&update.resource_desc),
         SupportedTable::PavingTileDesc => serialize(&update.paving_tile_desc),
         SupportedTable::TerrainChunkState => serialize(&update.terrain_chunk_state),
         SupportedTable::PavedTileState => serialize(&update.paved_tile_state),

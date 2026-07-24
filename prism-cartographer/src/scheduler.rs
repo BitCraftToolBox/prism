@@ -45,6 +45,7 @@ pub async fn run(config: Arc<Config>, shutdown: SharedShutdown) -> Result<()> {
             RendererKind::Game => game_trigger_tx.as_ref().map(|tx| tx.subscribe()),
             RendererKind::Terrain => terrain_trigger_tx.as_ref().map(|tx| tx.subscribe()),
             RendererKind::Roads => None,
+            RendererKind::Resources => None,
         };
 
         let handle = tokio::spawn(run_task(schedule_str, renderer, cfg, sd, manual_trigger_rx));
@@ -348,6 +349,7 @@ fn tiles_dir_for(renderer: RendererKind, output_dir: &Path) -> PathBuf {
         RendererKind::Terrain => output_dir.join("maps").join("terrain").join("tiles"),
         RendererKind::Game => output_dir.join("maps").join("game").join("tiles"),
         RendererKind::Roads => output_dir.join("roads").join("tiles"),
+        RendererKind::Resources => output_dir.join("heatmaps").join("resources"),
     }
 }
 
@@ -422,6 +424,12 @@ fn run_renderer(
         RendererKind::Roads => crate::renderers::roads::render(
             &config.input_dir,
             &config.region_prefix,
+            tiles_dir,
+            canceled,
+        ),
+        RendererKind::Resources => crate::renderers::resources::render(
+            &config.input_dir,
+            config.relay.as_ref(),
             tiles_dir,
             canceled,
         ),

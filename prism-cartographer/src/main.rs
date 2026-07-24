@@ -8,6 +8,16 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
+/// Histogram buckets for cartographer histograms (currently just the
+/// resources renderer's per-resource subscription apply time). Renders the
+/// `metrics` histogram as a native Prometheus histogram (`_bucket`/`le`)
+/// instead of the default rolling summary, so `histogram_quantile(...)`
+/// dashboard queries work. Range spans a fast relay round-trip up to the
+/// renderer's own subscribe timeout (30s).
+const SUBSCRIBE_APPLY_BUCKETS: &[f64] = &[
+    0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
+];
+
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -44,6 +54,8 @@ fn main() -> Result<()> {
         if let Some(m) = &config.metrics {
             metrics_exporter_prometheus::PrometheusBuilder::new()
                 .add_global_label("node", m.node.clone())
+                .set_buckets(SUBSCRIBE_APPLY_BUCKETS)
+                .expect("valid histogram buckets")
                 .with_http_listener(([0, 0, 0, 0], m.port))
                 .install()
                 .expect("metrics recorder");

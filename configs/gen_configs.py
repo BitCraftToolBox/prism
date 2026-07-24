@@ -82,7 +82,7 @@ tables = [
     {{ name = "location_state", output_file = "road_locations", query = "SELECT loc.* FROM paved_tile_state pts JOIN location_state loc ON pts.entity_id = loc.entity_id;" }},{m_global_2}
 ]
 """
-m_global_2 = '\n    { name = "paving_tile_desc", output_folder = "global" },'
+m_global_2 = '\n    { name = "paving_tile_desc", output_folder = "global" },\n    { name = "resource_desc", output_folder = "global" },'
 
 if mapper:
     outfile = "mapper.toml"

@@ -9,6 +9,11 @@ name = "prism-cartographer"
 path = "src/main.rs"
 
 [dependencies]
+# Downstream: generated client bindings for the relay module (standard SDK 2.x).
+relay_bindings = { path = "../relay-bindings" }
+# Standard SDK 2.x re-exported for trait imports (DbContext, Table, SubscriptionHandle).
+relay_sdk = { package = "spacetimedb-sdk", version = "2.4.0" }
+
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "process"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

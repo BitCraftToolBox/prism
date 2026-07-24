@@ -6,6 +6,10 @@ run_on_complete = "/app/upload_tiles.sh {} {root}"
 port = 9090
 node = "cartographer"
 
+[relay]
+uri = "https://st.prism.brico.app"
+module = "prism-relay"
+
 [[tasks]]
 renderer = "terrain"
 # daily, offset ~5 min from the terrain dump tasks
@@ -20,3 +24,8 @@ schedule = "0 10 4 * * *"
 renderer = "roads"
 # hourly, shortly after all paving dump tasks, but before terrain rendering
 schedule = "0 50 * * * *"
+
+[[tasks]]
+renderer = "resources"
+# twice daily, shortly after roads, which dumps resource desc for us, and after normal maint time to catch new spawns
+schedule = "0 55 10,22 * * *"

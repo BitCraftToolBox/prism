@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'prism-cartographer/**'
+      - 'relay-bindings/src/resource_location_*.rs'
 
 jobs:
   build-cartographer:

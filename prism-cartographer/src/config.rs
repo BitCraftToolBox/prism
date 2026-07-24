@@ -26,8 +26,23 @@ pub struct Config {
     /// via `sh -c`.  If no `{}` is present the command is run as-is.
     pub run_on_complete: Option<String>,
 
+    /// Relay module connection. Required by the `resources` renderer, which
+    /// subscribes to `resource_location` rows on the relay's client cache.
+    #[serde(default)]
+    pub relay: Option<RelayConfig>,
+
     #[serde(default)]
     pub metrics: Option<MetricsConfig>,
+}
+
+/// Connection details for the downstream relay module (same shape as
+/// `prism/src/config.rs::RelayConfig`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct RelayConfig {
+    pub uri: String,
+    pub module: String,
+    #[serde(default)]
+    pub token: Option<String>,
 }
 
 fn default_region_prefix() -> String {
@@ -51,6 +66,7 @@ pub enum RendererKind {
     Terrain,
     Game,
     Roads,
+    Resources,
 }
 
 impl std::fmt::Display for RendererKind {
@@ -59,6 +75,7 @@ impl std::fmt::Display for RendererKind {
             RendererKind::Terrain => write!(f, "terrain"),
             RendererKind::Game => write!(f, "game"),
             RendererKind::Roads => write!(f, "roads"),
+            RendererKind::Resources => write!(f, "resources"),
         }
     }
 }

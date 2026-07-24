@@ -3,8 +3,6 @@ import cron, {ScheduledTask} from 'node-cron';
 import {main} from "./src/main";
 import {startMetricsServer} from "./src/metrics";
 
-startMetricsServer(9090);
-
 let args: string[] = process.argv.slice(2);
 
 if (args.length > 0 && cron.validate(args[0])) {
@@ -22,6 +20,8 @@ if (args.length > 0 && cron.validate(args[0])) {
     };
     process.on('SIGUSR2', triggerManual);
     process.on('USR2', triggerManual);
+
+    startMetricsServer(9090);
 
     console.log("Scheduling task @", timeArg, "args:", passArgs);
     task = cron.schedule(timeArg, () => {

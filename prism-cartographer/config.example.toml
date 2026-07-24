@@ -19,6 +19,12 @@ output_dir = "output"
 # Example:
 #   run_on_complete = "/app/upload_tiles.sh {} {root}"
 
+# Relay module connection. Required by the "resources" renderer, which
+# subscribes to resource_location rows on the relay's client cache.
+# [relay]
+# uri = "https://st.prism.brico.app"
+# module = "prism-relay"
+
 # ── scheduled tasks ───────────────────────────────────────────────────────────
 # Cron expressions use 6 fields: sec  min  hour  dom  month  dow
 # Examples:
@@ -36,4 +42,8 @@ schedule = "0 0 * * * *"
 [[tasks]]
 renderer = "roads"
 schedule = "0 */10 * * * *"
+
+[[tasks]]
+renderer = "resources"
+schedule = "0 */15 * * * *"
 
