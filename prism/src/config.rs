@@ -128,6 +128,13 @@ pub struct PipelinesConfig {
     pub crafts: bool,
     #[serde(default = "default_true")]
     pub claims: bool,
+    /// Resource `tag`s (matched against `resource_desc.tag`) whose resources
+    /// should receive a targeted `resource_growth_timer` subscription when they
+    /// spawn. Feeds the same relay `growth_timer` table as the legacy
+    /// `growth_state` pipeline. Optional; when unset/empty this new path is
+    /// dormant and only `growth_state` timers are relayed.
+    #[serde(default)]
+    pub growth_resource_tags: Option<Vec<String>>,
 }
 
 impl PipelinesConfig {

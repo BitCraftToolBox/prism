@@ -14,13 +14,15 @@ use std::sync::Arc;
 use anyhow::Result;
 use log::{debug, warn};
 use metrics::histogram;
-use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, channel};
+use tokio::sync::mpsc::{
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
+};
 
 use crate::config::{Config, PipelinesConfig};
 use crate::history::{HistoryMsg, history_capacity, history_enabled};
 use crate::relay::{RelayMsg, relay_capacity};
 use crate::shutdown::SharedShutdown;
-use crate::upstream::RegionUpdate;
+use crate::upstream::{GrowthTimerSubRequest, RegionUpdate};
 
 use join::JoinState;
 
@@ -37,11 +39,22 @@ pub struct ProcessorHandle {
     /// Which pipelines this instance is responsible for — gates which tables
     /// the initial sync->live bulk replace is allowed to overwrite.
     pub pipelines: PipelinesConfig,
+    /// Back-channel to the upstream connections: requests targeted
+    /// `resource_growth_timer` subscriptions for newly-inserted tagged
+    /// resources. Demultiplexed to the right region by `region_id`.
+    pub growth_sub_tx: UnboundedSender<GrowthTimerSubRequest>,
 }
 
-/// Build the two bounded sink channels. Returns (handle for processor task,
-/// receivers for the sinks).
-pub fn channels(config: &Config) -> (ProcessorHandle, ProcessorSinks) {
+/// Build the bounded sink channels plus the unbounded growth-timer
+/// subscription back-channel. Returns (handle for processor task, receivers
+/// for the sinks, receiver the upstream demux drains).
+pub fn channels(
+    config: &Config,
+) -> (
+    ProcessorHandle,
+    ProcessorSinks,
+    UnboundedReceiver<GrowthTimerSubRequest>,
+) {
     let (relay_tx, relay_rx) = channel(relay_capacity(config));
     let (history_tx, history_rx) = if history_enabled(config) {
         let (tx, rx) = channel(history_capacity(config));
@@ -49,16 +62,19 @@ pub fn channels(config: &Config) -> (ProcessorHandle, ProcessorSinks) {
     } else {
         (None, None)
     };
+    let (growth_sub_tx, growth_sub_rx) = unbounded_channel();
     (
         ProcessorHandle {
             relay_tx,
             history_tx,
             pipelines: config.pipelines.clone(),
+            growth_sub_tx,
         },
         ProcessorSinks {
             relay_rx,
             history_rx,
         },
+        growth_sub_rx,
     )
 }
 

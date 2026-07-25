@@ -31,6 +31,11 @@ pub struct RegionJoinState {
     pub player_signed_in: HashSet<u64>,
     /// entity_id -> growth end timestamp micros (sync phase only; cleared by clear_live_caches)
     pub growth_timers: HashMap<u64, i64>,
+    /// resource_desc id -> tag. Populated from the `resource_desc` subscription
+    /// (GrowthTimers pipeline) and used in the live phase to decide which newly
+    /// inserted resources warrant a targeted `resource_growth_timer` sub, so it
+    /// is maintained in both phases and intentionally survives clear_live_caches.
+    pub resource_desc_tags: HashMap<i32, String>,
     /// set of entity_ids that are players in this region.
     /// Seeded from player_username.keys() at the sync→live transition, then
     /// maintained by player_username_state events.  Used in live mode to route
@@ -348,6 +353,9 @@ impl RegionJoinState {
         // claim_research / claim_banks / claim_marketplaces / claim_waystones
         // are intentionally retained: live-phase ClaimInfo upserts need the
         // full set of flags to emit a coherent row.
+        //
+        // resource_desc_tags is likewise retained: the live phase reads it to
+        // decide which newly-inserted resources warrant a growth-timer sub.
     }
 }
 

@@ -14,7 +14,7 @@ use crate::relay::{
     ClaimInfoRow, ClaimSupplyRow, CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow,
     EnemyRow, GrowthTimerRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow,
 };
-use crate::upstream::{Phase, RegionUpdate};
+use crate::upstream::{GrowthTimerSubRequest, Phase, RegionUpdate};
 use anyhow::Result;
 use log::{debug, info};
 use metrics::counter;
@@ -22,6 +22,11 @@ use std::collections::HashSet;
 use upstream_bindings::region::DbUpdate;
 
 const OVERWORLD_DIM: u32 = 1;
+
+/// Max resource entity ids per targeted `resource_growth_timer` subscription
+/// request. The sync-phase sweep can match many resources at once, so batches
+/// are chunked to keep any single subscription's query list bounded.
+const GROWTH_TIMER_SUB_CHUNK: usize = 500;
 
 pub async fn handle(
     state: &mut JoinState,
@@ -147,6 +152,16 @@ pub async fn handle(
         // subscription rows can be stale (e.g. offline player locations).
         // Craft/recipe state is mirrored above from the initial snapshot.
 
+        // Resources gathered during sync also get growth-timer subs, mirroring
+        // the live-spawn path in emit_deltas. Must run before clear_live_caches
+        // drops resource_kind.
+        request_tagged_growth_timers(
+            region_id,
+            region.resource_kind.iter().map(|(&eid, &rid)| (eid, rid)),
+            region,
+            sinks,
+        );
+
         // The snapshot is done; all sync-phase caches are no longer needed.
         // clear_live_caches seeds player_entity_ids and drops the rest.
         region.clear_live_caches();
@@ -213,6 +228,18 @@ fn update_join_maps(region: &mut super::join::RegionJoinState, update: &DbUpdate
         region.claim_waystones.insert(e.row.claim_entity_id);
     }
 
+    // resource_desc id → tag. Maintained in both phases: it arrives during the
+    // sync phase (GrowthTimers pipeline) but is read in the live phase to
+    // classify newly-inserted resources for targeted growth-timer subs.
+    for e in &update.resource_desc.deletes {
+        region.resource_desc_tags.remove(&e.row.id);
+    }
+    for e in &update.resource_desc.inserts {
+        region
+            .resource_desc_tags
+            .insert(e.row.id, e.row.tag.clone());
+    }
+
     if !live {
         for e in &update.user_state.deletes {
             region.user_identity_map.remove(&e.row.identity);
@@ -274,6 +301,9 @@ fn update_join_maps(region: &mut super::join::RegionJoinState, update: &DbUpdate
         for e in &update.resource_state.deletes {
             region.resource_kind.remove(&e.row.entity_id);
         }
+        for e in &update.location_state.deletes {
+            region.last_location.remove(&e.row.entity_id);
+        }
         for e in &update.location_state.inserts {
             region.last_location.insert(
                 e.row.entity_id,
@@ -283,9 +313,6 @@ fn update_join_maps(region: &mut super::join::RegionJoinState, update: &DbUpdate
                     dimension: e.row.dimension,
                 },
             );
-        }
-        for e in &update.location_state.deletes {
-            region.last_location.remove(&e.row.entity_id);
         }
         for e in &update.resource_state.inserts {
             region
@@ -425,6 +452,7 @@ fn emit_deltas(
             resource_state,
             location_state,
             growth_state,
+            resource_growth_timer,
             mobile_entity_state,
             enemy_state,
             player_username_state,
@@ -498,6 +526,35 @@ fn emit_deltas(
             end_timestamp_micros: e.row.end_timestamp.to_micros_since_unix_epoch(),
         });
     }
+
+    // resource_growth_timer rows arrive from the targeted subscriptions opened
+    // for newly-inserted tagged resources (a parallel path to growth_state;
+    // both feed the relay growth_timer table identically). We expect Time-
+    // variant schedules — Interval schedules are not real growth end-times and
+    // are skipped.
+    for e in &update.resource_growth_timer.inserts {
+        if let upstream_bindings::sdk::ScheduleAt::Time(ts) = &e.row.scheduled_at {
+            growth_timer_upserts.push(GrowthTimerRow {
+                entity_id: e.row.entity_id,
+                end_timestamp_micros: ts.to_micros_since_unix_epoch(),
+            });
+        }
+    }
+
+    // Newly-inserted resources whose tag is configured for the new growth-timer
+    // path get a targeted resource_growth_timer subscription on the upstream
+    // connection (see upstream::connection::subscribe_growth_timers). The rows
+    // that subscription yields flow back through this same function above.
+    request_tagged_growth_timers(
+        region_id,
+        update
+            .resource_state
+            .inserts
+            .iter()
+            .map(|e| (e.row.entity_id, e.row.resource_id)),
+        region,
+        sinks,
+    );
 
     // Mobile entity updates.
     // SpacetimeDB transactional guarantees:
@@ -628,14 +685,24 @@ fn emit_deltas(
     }
 
     // Sign-in / sign-out: targeted online-field updates; no username lookup needed.
-    for e in &update.signed_in_player_state.inserts {
-        player_online_ids.push(e.row.entity_id);
-    }
     for e in &update.signed_in_player_state.deletes {
         player_offline_ids.push(e.row.entity_id);
     }
+    for e in &update.signed_in_player_state.inserts {
+        player_online_ids.push(e.row.entity_id);
+    }
 
     // Recipe metadata mirroring.
+    for e in &update.crafting_recipe_desc.deletes {
+        if !update
+            .crafting_recipe_desc
+            .inserts
+            .iter()
+            .any(|ins| ins.row.id == e.row.id)
+        {
+            recipe_deletes.push(e.row.id);
+        }
+    }
     for e in &update.crafting_recipe_desc.inserts {
         recipe_upserts.push(RecipeMetaRow {
             id: e.row.id,
@@ -659,16 +726,6 @@ fn emit_deltas(
                 .map(|r| r.level)
                 .unwrap_or(0),
         });
-    }
-    for e in &update.crafting_recipe_desc.deletes {
-        if !update
-            .crafting_recipe_desc
-            .inserts
-            .iter()
-            .any(|ins| ins.row.id == e.row.id)
-        {
-            recipe_deletes.push(e.row.id);
-        }
     }
 
     // Public toggles without a corresponding progressive_action_state change.
@@ -955,6 +1012,46 @@ fn emit_deltas(
         );
     }
     send_history(&sinks.history_tx, history_msgs.into_iter());
+}
+
+/// If `growth_resource_tags` is configured, emit targeted
+/// `resource_growth_timer` subscription requests for the given resources
+/// (`(entity_id, resource_id)` pairs) whose `resource_desc` tag matches.
+/// Requests are chunked ([`GROWTH_TIMER_SUB_CHUNK`]) so no single subscription
+/// carries an unbounded query list. Shared by the sync-phase sweep and the
+/// live-phase spawn path.
+fn request_tagged_growth_timers(
+    region_id: u8,
+    resources: impl Iterator<Item = (u64, i32)>,
+    region: &super::join::RegionJoinState,
+    sinks: &ProcessorHandle,
+) {
+    let Some(tags) = &sinks.pipelines.growth_resource_tags else {
+        return;
+    };
+    if tags.is_empty() {
+        return;
+    }
+    let mut batch: Vec<u64> = Vec::new();
+    for (entity_id, resource_id) in resources {
+        if let Some(tag) = region.resource_desc_tags.get(&resource_id)
+            && tags.iter().any(|t| t == tag)
+        {
+            batch.push(entity_id);
+            if batch.len() >= GROWTH_TIMER_SUB_CHUNK {
+                let _ = sinks.growth_sub_tx.send(GrowthTimerSubRequest {
+                    region_id,
+                    entity_ids: std::mem::take(&mut batch),
+                });
+            }
+        }
+    }
+    if !batch.is_empty() {
+        let _ = sinks.growth_sub_tx.send(GrowthTimerSubRequest {
+            region_id,
+            entity_ids: batch,
+        });
+    }
 }
 
 fn has_progressive_action_state_change(update: &DbUpdate, eid: u64) -> bool {

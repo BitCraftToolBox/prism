@@ -59,8 +59,9 @@ async fn main() -> Result<()> {
     // Upstream → processor channel (unbounded — backpressure happens at the
     // per-sink processor→sink channels instead).
     let (upstream_tx, upstream_rx) = unbounded_channel();
-    // Processor → sink channels (bounded).
-    let (proc_handle, sinks) = processor::channels(&config);
+    // Processor → sink channels (bounded), plus the processor → upstream
+    // growth-timer subscription back-channel (unbounded).
+    let (proc_handle, sinks, growth_sub_rx) = processor::channels(&config);
     // upstream → dumper channel (bounded).
     let (dump_tx, dump_rx) = tokio::sync::mpsc::channel(dumper::dumper_capacity(&config));
 
@@ -69,7 +70,13 @@ async fn main() -> Result<()> {
     // triggers shutdown for everyone.
     let up = tokio::spawn(spawn_subsystem(
         "upstream",
-        upstream::run_all(config.clone(), upstream_tx, dump_tx, shutdown.clone()),
+        upstream::run_all(
+            config.clone(),
+            upstream_tx,
+            dump_tx,
+            growth_sub_rx,
+            shutdown.clone(),
+        ),
         shutdown.clone(),
     ));
     let proc = tokio::spawn(spawn_subsystem(

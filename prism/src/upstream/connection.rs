@@ -12,10 +12,13 @@ use cron::Schedule;
 use log::{debug, error, info, warn};
 use metrics::{counter, gauge};
 use tokio::sync::broadcast;
-use tokio::sync::mpsc::{Sender, UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
 use upstream_bindings::ext::ctx::RunUntil;
 use upstream_bindings::region::{DbConnection, DbUpdate, Reducer};
-use upstream_bindings::sdk::{DbContext, Event};
+// `SubscriptionHandle` is imported anonymously purely to bring its
+// `unsubscribe` method into scope without colliding with the concrete
+// `region::SubscriptionHandle` type.
+use upstream_bindings::sdk::{DbContext, Event, SubscriptionHandle as _};
 
 use super::subscription::{Pipeline, enabled_pipelines, queue_subscribe};
 use super::{Phase, RegionUpdate, SharedPhase, load_phase, store_phase};
@@ -39,12 +42,14 @@ fn error_is_normal_disconnect(e: &upstream_bindings::sdk::Error) -> bool {
     matches!(e, upstream_bindings::sdk::Error::Disconnected)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_region(
     config: Arc<Config>,
     region: RegionConfig,
     reconnect_offset: Duration,
     proc_tx: UnboundedSender<RegionUpdate>,
     dump_tx: Sender<DumpMsg>,
+    mut growth_sub_rx: UnboundedReceiver<Vec<u64>>,
     shutdown: SharedShutdown,
     dump_manual_trigger_tx: Option<broadcast::Sender<()>>,
 ) -> Result<()> {
@@ -165,7 +170,9 @@ pub async fn run_region(
                     let _ = drain.await;
                     return Ok(());
                 };
-                if let Err(e) = con.run_until(signal).await {
+                if let Err(e) =
+                    run_connection(&con, signal, &mut growth_sub_rx, &region.name).await
+                {
                     error!("[{}] connection ended with error: {:?}", region.name, e);
                 }
             }
@@ -210,6 +217,93 @@ pub async fn run_region(
             _ = tokio::time::sleep(reconnect_backoff) => {}
         }
     }
+}
+
+/// Drive the live connection until shutdown or disconnect. Mirrors
+/// [`RunUntil::run_until`] but also services growth-timer subscription requests
+/// from the processor on the *same* live connection (see
+/// [`subscribe_growth_timers`]). Servicing a request only queues a pending
+/// subscription (a synchronous, non-blocking operation), so it never stalls the
+/// message loop that `exec` drives.
+async fn run_connection(
+    con: &DbConnection,
+    signal: tokio::sync::oneshot::Receiver<()>,
+    growth_sub_rx: &mut UnboundedReceiver<Vec<u64>>,
+    region: &str,
+) -> upstream_bindings::sdk::Result<()> {
+    let exec = con.run_async();
+    tokio::pin!(exec);
+    tokio::pin!(signal);
+    // Cleared once the processor drops its sender so we stop polling a
+    // permanently-ready `recv()` (which would otherwise busy-loop).
+    let mut sub_open = true;
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut signal => {
+                let _ = con.disconnect();
+                return (&mut exec).await;
+            }
+            v = &mut exec => return v,
+            maybe = growth_sub_rx.recv(), if sub_open => {
+                match maybe {
+                    Some(entity_ids) => subscribe_growth_timers(con, region, entity_ids),
+                    None => sub_open = false,
+                }
+            }
+        }
+    }
+}
+
+/// Open one batched `resource_growth_timer` subscription for the given resource
+/// entity ids on the live connection (one `WHERE entity_id = …` query per id).
+/// The resulting rows arrive through the cacheless channel like any other
+/// update and are relayed by the processor. As soon as the subscription is
+/// applied we unsubscribe: these timers are not expected to change, and we do
+/// not want to keep many narrow subscriptions open.
+fn subscribe_growth_timers(con: &DbConnection, region: &str, entity_ids: Vec<u64>) {
+    if entity_ids.is_empty() {
+        return;
+    }
+    let count = entity_ids.len();
+    let queries: Vec<String> = entity_ids
+        .into_iter()
+        .map(|eid| format!("SELECT * FROM resource_growth_timer WHERE entity_id = {eid};"))
+        .collect();
+
+    // The applied callback needs the handle to unsubscribe, but the handle only
+    // exists once `subscribe` returns. Stash it in a shared slot; the callback
+    // runs on the connection's own message loop, strictly after we populate the
+    // slot below, so there is no race.
+    let slot = Arc::new(std::sync::Mutex::new(
+        None::<upstream_bindings::region::SubscriptionHandle>,
+    ));
+    let slot_for_applied = slot.clone();
+    let region_for_applied = region.to_string();
+    let region_for_error = region.to_string();
+
+    let handle = con
+        .subscription_builder()
+        .on_error(move |_ectx, e| {
+            warn!(
+                "[{}] growth-timer subscription error: {:?}",
+                region_for_error, e
+            );
+        })
+        .on_applied(move |_sub_ctx| {
+            let Some(handle) = slot_for_applied.lock().unwrap().take() else {
+                return;
+            };
+            if let Err(e) = handle.unsubscribe() {
+                debug!(
+                    "[{}] growth-timer unsubscribe failed: {:?}",
+                    region_for_applied, e
+                );
+            }
+        })
+        .subscribe(queries);
+    *slot.lock().unwrap() = Some(handle);
+    debug!("[{region}] growth-timer subscription opened for {count} resource(s)");
 }
 
 /// Runs indefinitely on a timer.  Each interval it opens a fresh, short-lived

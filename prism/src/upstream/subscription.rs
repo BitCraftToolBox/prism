@@ -22,6 +22,9 @@ pub enum Pipeline {
     Resources,
     /// `growth_state` - not joined on prism. Feeds the relay
     /// `growth_timer` table, joined module-side to resources.
+    /// Also subscribes `resource_desc` (resource_id → tag map) to drive the
+    /// targeted `resource_growth_timer` subscriptions (see
+    /// [`crate::config::PipelinesConfig::growth_resource_tags`]).
     GrowthTimers,
     /// `enemy_state` + `mobile_entity_state` join. Feeds the relay
     /// `enemy_location` table (dim == 1).
@@ -59,6 +62,8 @@ impl Pipeline {
                 "SELECT gs.* FROM growth_state gs \
                  JOIN resource_state res ON gs.entity_id = res.entity_id;"
                     .into(),
+                // resource_id → tag map for targeted resource_growth_timer subs
+                "SELECT * FROM resource_desc;".into(),
             ],
             Pipeline::Enemies => vec![
                 "SELECT * FROM enemy_state;".into(),

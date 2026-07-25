@@ -29,6 +29,7 @@ module = "prism-relay"
 [pipelines]
 resources = true
 growth_timers = true
+growth_resource_tags = ["World Event", "Hexite", "Wonder Resource"]
 enemies = true
 players = true
 crafts = false
