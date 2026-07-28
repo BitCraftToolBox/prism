@@ -35,12 +35,12 @@ for (group, name), regions in region_groups.items():
     outfile = f"prism-{group}.toml"
     output = (before
               .replace("$OFFSET$", str(offset1))
-              .replace("$NAME$", "prism-" + name))
+              .replace("$NAME$", "prism-" + (name or str(group)))
     for region in regions:
         output += "\n[[upstream.regions]]\n"\
                   f"name = \"bitcraft-live-{region}\"\n"\
                   f"id = {region}\n"
-    output += after.replace("$NAME$", "prism-" + name)
+    output += after.replace("$NAME$", "prism-" + (name or str(group)))
     offset1 += 15
     with open(os.path.join(out_dir, outfile), "w") as f:
         f.write(output)
@@ -71,8 +71,6 @@ m_d_1 = """
 schedule = "{m_offset_1} 55 3 * * *"
 tables = [
     {{ name = "terrain_chunk_state" }},{m_global_1}
-#     {{ name = "location_state", output_file = "resource_locations", query = "SELECT loc.* FROM resource_state res JOIN location_state loc ON res.entity_id = loc.entity_id;" }},
-#     {{ name = "resource_state" }},
 ]
 """
 m_global_1 = '\n    { name = "biome_desc", output_folder = "global" },'
@@ -124,8 +122,8 @@ resources = false
 growth_timers = false
 enemies = false
 players = false
-crafts = true
 claims = false
+crafts = true
 """
 
 if craft_mon:

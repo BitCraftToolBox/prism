@@ -3,7 +3,7 @@
 
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -21,7 +21,7 @@ use upstream_bindings::region::{DbConnection, DbUpdate, Reducer};
 use upstream_bindings::sdk::{DbContext, Event, SubscriptionHandle as _};
 
 use super::subscription::{Pipeline, enabled_pipelines, queue_subscribe};
-use super::{Phase, RegionUpdate, SharedPhase, load_phase, store_phase};
+use super::{Phase, RegionUpdate};
 use crate::config::{Config, DumpScheduleConfig, RegionConfig};
 use crate::dumper::table_extract::SupportedTable;
 use crate::dumper::{DumpMsg, table_extract};
@@ -90,24 +90,44 @@ pub async fn run_region(
     let mut reconnect_backoff_idx = 0usize;
 
     loop {
-        // Per-connection phase shared between the connection task and the
-        // channel-drain task.
-        let phase: SharedPhase = Arc::new(AtomicU8::new(Phase::Syncing as u8));
-
         // The cacheless update channel is private to one connection — we
         // drain it from a helper task that re-emits tagged updates.
+        //
+        // The sync→live boundary is derived from the drained stream itself:
+        // each pipeline's `subscribe()` call yields exactly one combined
+        // `Event::SubscribeApplied` message (queries batched into a single
+        // query_id — see `subscription::queue_subscribe`), so counting those
+        // events against the enabled pipeline count tells us, from inside the
+        // FIFO drain loop, exactly which message is the last sync-phase one.
+        // This intentionally avoids a separate `AtomicU8` phase flag read at
+        // dequeue time: the SDK invokes a subscription's `on_applied`
+        // callback *before* sending that same message's row data into this
+        // channel (see `DbContextImpl::apply_update`), so a flag set from
+        // `on_applied` can race ahead of — and mistag — messages still
+        // sitting in this channel's backlog. Deriving the boundary from the
+        // count of messages already dequeued makes that race impossible.
         let (cache_tx, mut cache_rx) = unbounded_channel::<(DbUpdate, Event<Reducer>)>();
-        let drain_phase = phase.clone();
         let drain_tx = proc_tx.clone();
         let drain_region = region.id;
         let region_label = region.name.clone();
+        let pipeline_count = pipelines.len();
         let drain = tokio::spawn(async move {
             let label = region_label.as_str().to_owned();
+            let mut applied_count = 0usize;
+            let mut is_live = false;
             while let Some(update) = cache_rx.recv().await {
                 counter!("prism_upstream_messages_total", "region" => label.clone()).increment(1);
+                if !is_live && matches!(update.1, Event::SubscribeApplied) {
+                    applied_count += 1;
+                    // TODO this may eventually need to account for chunk-index-based subscriptions
+                    if applied_count >= pipeline_count {
+                        is_live = true;
+                    }
+                }
+                let phase = if is_live { Phase::Live } else { Phase::Syncing };
                 let _ = drain_tx.send(RegionUpdate {
                     region_id: drain_region,
-                    phase: load_phase(&drain_phase),
+                    phase,
                     update: update.0,
                     reducer: update.1,
                 });
@@ -115,7 +135,6 @@ pub async fn run_region(
         });
 
         let pipelines_for_connect = pipelines.clone();
-        let phase_for_connect = phase.clone();
         let region_name_for_log = region.name.clone();
         let region_name_for_disconnect = region.name.clone();
         let connected_this_attempt = Arc::new(AtomicBool::new(false));
@@ -135,7 +154,6 @@ pub async fn run_region(
                     "[{}] connected; starting subscriptions",
                     region_name_for_log
                 );
-                let phase = phase_for_connect.clone();
                 let region_name = region_name_for_log.clone();
                 let region_label_for_live = region_name_for_log.clone();
                 let connect_start = std::time::Instant::now();
@@ -150,7 +168,6 @@ pub async fn run_region(
                             "region" => region_label_for_live.clone()
                         )
                         .set(connect_start.elapsed().as_secs_f64());
-                        store_phase(&phase, Phase::Live);
                     },
                 );
             })

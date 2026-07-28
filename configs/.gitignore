@@ -2,5 +2,6 @@
 *.yml
 *.sh
 Dockerfile*
+infra/
 # generic
 !cartographer.toml

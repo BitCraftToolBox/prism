@@ -7,6 +7,12 @@
 //! the current sync phase (Snapshot vs Delta), and forward to the shared
 //! processor.
 //!
+//! The sync→live boundary is derived from the drained message stream itself
+//! (counting `Event::SubscribeApplied` events against the enabled pipeline
+//! count — see [`connection::run_region`]) rather than from an out-of-band
+//! flag, so the phase tag on a given message can never race ahead of the
+//! message itself.
+//!
 //! [cacheless]: https://github.com/BitCraftToolBox/cacheless-rust-bindings
 
 pub mod connection;
@@ -14,7 +20,6 @@ pub mod subscription;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 use tokio::sync::broadcast;
@@ -50,37 +55,17 @@ pub struct GrowthTimerSubRequest {
     pub entity_ids: Vec<u64>,
 }
 
-/// Per-region sync phase. Stored as an `AtomicU8` shared between the
-/// connection task and the channel-drain task so the latter can stamp each
-/// raw update as it goes by.
-#[repr(u8)]
+/// Per-region sync phase, assigned by the channel-drain task in
+/// [`connection::run_region`] as it counts `Event::SubscribeApplied` messages
+/// against the enabled pipeline count for the current connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
     /// Subscriptions are still being applied — updates are part of the
     /// initial snapshot and should accumulate, to be flushed as a single
     /// `ReplaceRegion` once `Live` is reached.
-    Syncing = 0,
+    Syncing,
     /// All subscriptions are live — updates are incremental deltas.
-    Live = 1,
-}
-
-impl Phase {
-    fn from_u8(v: u8) -> Self {
-        match v {
-            1 => Phase::Live,
-            _ => Phase::Syncing,
-        }
-    }
-}
-
-pub type SharedPhase = Arc<AtomicU8>;
-
-pub fn store_phase(p: &SharedPhase, phase: Phase) {
-    p.store(phase as u8, Ordering::SeqCst);
-}
-
-pub fn load_phase(p: &SharedPhase) -> Phase {
-    Phase::from_u8(p.load(Ordering::SeqCst))
+    Live,
 }
 
 /// Spawn one connection task per configured region. All tasks share the
