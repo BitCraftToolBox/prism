@@ -45,31 +45,10 @@ export interface WaystoneStateData {
     claim_entity_id: bigint;
 }
 
-export interface GrowthStateData {
-    entity_id: bigint;
-    growth_recipe_id: number;
-    end_timestamp: {
-        __timestamp_micros_since_unix_epoch__: bigint;
-    };
-}
-
-export interface GrowthStateLocations {
-    entity_id: bigint;
-    x: number;
-    z: number;
-}
-
-export interface GrowthStateTimers {
-    entity_id: bigint;
-    location: { x: number; z: number };
-    end_timestamp: Date;
-}
-
 export interface RegionData {
     claim_state: ClaimStateData[];
     claim_local_state: ClaimLocalStateData[];
     world_region_name_state: WorldRegionNameStateData[];
-    growth_timers: GrowthStateTimers[];
     bank_state: BankStateData[];
     marketplace_state: MarketplaceStateData[];
     waystone_state: WaystoneStateData[];

@@ -1,4 +1,4 @@
-import {ClaimLocalStateData, ClaimStateData, ClaimTechStateData, get_some_location, GrowthStateTimers, RegionData,} from "./types";
+import {ClaimLocalStateData, ClaimStateData, ClaimTechStateData, get_some_location, RegionData,} from "./types";
 import {compute_claim_tier, format_template_args} from "./utils";
 import {make_tower_feature, WatchtowerTerritory} from "./watchtower";
 
@@ -63,17 +63,10 @@ export function add_feature(
     claim_state: ClaimStateData,
     local_state: ClaimLocalStateData,
     territories: WatchtowerTerritory[],
-    growth_timers: GrowthStateTimers[],
     claim_extras: ClaimExtras,
 ): void {
     const location = get_some_location(local_state.location);
     if (!location) return;
-
-    function findTimer(loc: { x: number, z: number}) {
-        // find first timer within 5 block radius. none of the things we're interested in tracking should ever be this close to overlap with another
-        // i.e., vaults, hexite, maker's trees
-        return growth_timers.find(t => Math.pow(t.location.x - loc.x, 2) + Math.pow(t.location.z - loc.z, 2) < 50);
-    }
 
     const claim_name = format_template_args(claim_state.name);
 
@@ -83,16 +76,15 @@ export function add_feature(
             break;
         case 421789207:
         case 1375306631: {
-            const timer = findTimer(location)?.end_timestamp;
             const type = local_state.building_description_id === 421789207 ? 'hexite' : 'makers-tree';
-            outputs.empireResources.push(make_feature({name: claim_name, type, timer}, location.x, location.z));
+            outputs.empireResources.push(make_feature({name: claim_name, type, timer: null}, location.x, location.z));
             break;
         }
         case 578530093:
             outputs.events.push(make_feature({
                 name: 'Hexite Vault',
                 type: 'vault-event',
-                timer: findTimer(location)?.end_timestamp,
+                timer: null,
                 iconName: 'vault-event'
             }, location.x, location.z));
             break;

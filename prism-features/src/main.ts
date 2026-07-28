@@ -39,7 +39,6 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     const [region_data, parseSecs] = time(() => load_region_data(config.input_dir));
     jsonParseDuration.observe(parseSecs);
     dataRowsCount.labels('claim_state').set(region_data.claim_state.length);
-    dataRowsCount.labels('growth_timers').set(region_data.growth_timers.length);
 
     const [global_data, fetchSecs] = await timeAsync(() => fetch_global_data(config));
     globalFetchDuration.observe(fetchSecs);
@@ -56,7 +55,7 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     for (const claim_state of region_data.claim_state) {
         const local_state = local_state_map.get(claim_state.entity_id);
         if (!local_state) continue;
-        add_feature(outputs, claim_state, local_state, territories, region_data.growth_timers, claim_extras);
+        add_feature(outputs, claim_state, local_state, territories, claim_extras);
     }
 
     outputs.grids = build_grid_features(region_data.world_region_name_state);

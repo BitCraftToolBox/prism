@@ -5,9 +5,6 @@ import {
   ClaimLocalStateData,
   ClaimStateData,
   ClaimTechStateData,
-  GrowthStateData,
-  GrowthStateTimers,
-  GrowthStateLocations,
   MarketplaceStateData,
   RegionData,
   WaystoneStateData,
@@ -39,35 +36,6 @@ function infer_region_id(region_dir: string): number {
     return Number(match[1]);
 }
 
-function build_hexite_timers(region_dir: string): GrowthStateTimers[] {
-    const growth_state = read_json_file<GrowthStateData[]>(path.join(region_dir, "growth_state.json"), []);
-    const growth_locations = read_json_file<GrowthStateLocations[]>(path.join(region_dir, "timer_locations.json"), []);
-
-    if (growth_state.length === 0 || growth_locations.length === 0) {
-        return [];
-    }
-
-    const location_by_entity = new Map<bigint, GrowthStateLocations>();
-    for (const location of growth_locations) {
-        location_by_entity.set(location.entity_id, location);
-    }
-
-    const timers: GrowthStateTimers[] = [];
-    for (const growth of growth_state) {
-        const location = location_by_entity.get(growth.entity_id);
-        if (!location) continue;
-
-        const micros = growth.end_timestamp.__timestamp_micros_since_unix_epoch__;
-        timers.push({
-            entity_id: growth.entity_id,
-            location: {x: location.x, z: location.z},
-            end_timestamp: new Date(Number(micros / BigInt(1000))),
-        });
-    }
-
-    return timers;
-}
-
 function list_region_dirs(input_dir: string): string[] {
     const dirs = fs
         .readdirSync(input_dir, {withFileTypes: true})
@@ -87,7 +55,6 @@ export function load_region_data(input_dir: string): RegionData {
         claim_state: [],
         claim_local_state: [],
         world_region_name_state: [],
-        growth_timers: [],
         bank_state: [],
         marketplace_state: [],
         waystone_state: [],
@@ -121,7 +88,6 @@ export function load_region_data(input_dir: string): RegionData {
         combined.bank_state.push(...bank_state);
         combined.marketplace_state.push(...marketplace_state);
         combined.waystone_state.push(...waystone_state);
-        combined.growth_timers.push(...build_hexite_timers(region_dir));
     }
 
     return combined;
