@@ -28,6 +28,9 @@ pub enum Pipeline {
     GrowthTimers,
     /// `enemy_state` + `mobile_entity_state` join. Feeds the relay
     /// `enemy_location` table (dim == 1).
+    /// Also `herd_state` + `location_state` join (herds are static spawners,
+    /// not mobile) plus `enemy_ai_params_desc` (id → enemy_type map). Feeds
+    /// the relay `herd_location` table (dim == 1).
     Enemies,
     /// `player_state` + `mobile_entity_state` join. Feeds the relay
     /// `player_location` table (dim == 1) **and** the history sink
@@ -68,6 +71,13 @@ impl Pipeline {
             Pipeline::Enemies => vec![
                 "SELECT * FROM enemy_state;".into(),
                 "SELECT * FROM mobile_entity_state;".into(),
+                "SELECT hs.* FROM herd_state hs \
+                 JOIN location_state loc ON hs.entity_id = loc.entity_id;"
+                    .into(),
+                "SELECT loc.* FROM location_state loc \
+                 JOIN herd_state hs ON loc.entity_id = hs.entity_id;"
+                    .into(),
+                "SELECT * FROM enemy_ai_params_desc;".into(),
             ],
             Pipeline::Players => vec![
                 "SELECT * FROM mobile_entity_state;".into(),

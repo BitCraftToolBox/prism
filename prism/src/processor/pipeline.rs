@@ -8,11 +8,14 @@
 //! covering everything accumulated so far.
 
 use super::ProcessorHandle;
-use super::join::{ClaimLocalData, EntityLocation, JoinState, ProgressiveCraftState};
+use super::join::{
+    ClaimLocalData, EntityLocation, HerdSyncEntry, JoinState, ProgressiveCraftState,
+};
 use crate::history::HistoryMsg;
 use crate::relay::{
     ClaimInfoRow, ClaimSupplyRow, CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow,
-    EnemyRow, GrowthTimerRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow,
+    EnemyRow, GrowthTimerRow, HerdRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RelayMsg,
+    ResourceRow,
 };
 use crate::upstream::{GrowthTimerSubRequest, Phase, RegionUpdate};
 use anyhow::Result;
@@ -93,6 +96,13 @@ pub async fn handle(
             relay_msgs.push(RelayMsg::ReplaceEnemies {
                 region_id,
                 rows: enemy,
+            });
+
+            let herds = region.snapshot_herds(region_id);
+            counts.push(format!("herds={}", herds.len()));
+            relay_msgs.push(RelayMsg::ReplaceHerds {
+                region_id,
+                rows: herds,
             });
         }
         if pipelines.players {
@@ -240,6 +250,18 @@ fn update_join_maps(region: &mut super::join::RegionJoinState, update: &DbUpdate
             .insert(e.row.id, e.row.tag.clone());
     }
 
+    // enemy_ai_params_desc id → enemy_type. Maintained in both phases: read
+    // during sync to resolve the initial herd snapshot, and kept up to date
+    // in the live phase so herd deltas can always resolve a type.
+    for e in &update.enemy_ai_params_desc.deletes {
+        region.enemy_ai_type_map.remove(&e.row.id);
+    }
+    for e in &update.enemy_ai_params_desc.inserts {
+        region
+            .enemy_ai_type_map
+            .insert(e.row.id, e.row.enemy_type as i32);
+    }
+
     if !live {
         for e in &update.user_state.deletes {
             region.user_identity_map.remove(&e.row.identity);
@@ -319,6 +341,23 @@ fn update_join_maps(region: &mut super::join::RegionJoinState, update: &DbUpdate
                 .resource_kind
                 .insert(e.row.entity_id, e.row.resource_id);
         }
+
+        // Herds: herd_state for kind (ai params id + crumb-trail linkage),
+        // location_state (above) for coordinates — herds are static spawners
+        // rather than mobile entities.
+        for e in &update.herd_state.deletes {
+            region.herd_kind.remove(&e.row.entity_id);
+        }
+        for e in &update.herd_state.inserts {
+            region.herd_kind.insert(
+                e.row.entity_id,
+                HerdSyncEntry {
+                    enemy_ai_params_desc_id: e.row.enemy_ai_params_desc_id,
+                    crumb_trail_entity_id: e.row.crumb_trail_entity_id,
+                },
+            );
+        }
+
         for e in &update.growth_state.inserts {
             region.growth_timers.insert(
                 e.row.entity_id,
@@ -455,6 +494,8 @@ fn emit_deltas(
             resource_growth_timer,
             mobile_entity_state,
             enemy_state,
+            herd_state,
+            enemy_ai_params_desc,
             player_username_state,
             signed_in_player_state,
             crafting_recipe_desc,
@@ -475,6 +516,8 @@ fn emit_deltas(
     let mut resource_deletes: Vec<u64> = Vec::new();
     let mut enemy_upserts: Vec<EnemyRow> = Vec::new();
     let mut enemy_deletes: Vec<u64> = Vec::new();
+    let mut herd_upserts: Vec<HerdRow> = Vec::new();
+    let mut herd_deletes: Vec<u64> = Vec::new();
     let mut growth_timer_upserts: Vec<GrowthTimerRow> = Vec::new();
     let mut player_upserts: Vec<PlayerRow> = Vec::new();
     let mut player_state_upserts: Vec<PlayerStateRow> = Vec::new();
@@ -636,6 +679,74 @@ fn emit_deltas(
     // Enemy deletes come from enemy_state.
     for e in &update.enemy_state.deletes {
         enemy_deletes.push(e.row.entity_id);
+    }
+
+    // Herds are static spawners whose projected fields never change once
+    // live: a herd_state delete without a matching insert is a genuine
+    // removal; a delete+insert pair for the same entity is population/
+    // eagerness/variance churn on fields we don't project, so it's ignored.
+    for e in &update.herd_state.deletes {
+        let eid = e.row.entity_id;
+        if update
+            .herd_state
+            .inserts
+            .iter()
+            .any(|i| i.row.entity_id == eid)
+        {
+            continue;
+        }
+        herd_deletes.push(eid);
+    }
+    for e in &update.herd_state.inserts {
+        let eid = e.row.entity_id;
+        let ai_desc_id = e.row.enemy_ai_params_desc_id;
+        let crumb_trail = e.row.crumb_trail_entity_id;
+
+        // Only brand-new spawns are handled here — an insert with a matching
+        // same-batch delete is an in-place update, ignored above.
+        if update
+            .herd_state
+            .deletes
+            .iter()
+            .any(|d| d.row.entity_id == eid)
+        {
+            continue;
+        }
+
+        // Needs a same-batch location_state insert (transactional guarantee,
+        // mirroring the resource-insert path). enemy_ai_type_map is kept up
+        // to date in both phases specifically so a newly-inserted herd of a
+        // type added by a game update can still resolve here.
+        if crumb_trail > 0 || ai_desc_id == 0 {
+            continue;
+        }
+        let Some(enemy_type) = region
+            .enemy_ai_type_map
+            .get(&ai_desc_id)
+            .copied()
+            .filter(|&t| t != 0)
+        else {
+            continue;
+        };
+        let Some(loc) = update
+            .location_state
+            .inserts
+            .iter()
+            .find(|l| l.row.entity_id == eid)
+        else {
+            continue;
+        };
+        if loc.row.dimension != OVERWORLD_DIM {
+            continue;
+        }
+        herd_upserts.push(HerdRow {
+            entity_id: eid,
+            enemy_type,
+            enemy_params_ai_desc_id: ai_desc_id,
+            region_id,
+            x: loc.row.x,
+            z: loc.row.z,
+        });
     }
 
     // Player username events.
@@ -915,6 +1026,14 @@ fn emit_deltas(
     send_relay(
         &sinks.relay_tx,
         enemy_upserts.into_iter().map(RelayMsg::InsertEnemy),
+    );
+    send_relay(
+        &sinks.relay_tx,
+        herd_deletes.into_iter().map(RelayMsg::DeleteHerd),
+    );
+    send_relay(
+        &sinks.relay_tx,
+        herd_upserts.into_iter().map(RelayMsg::UpsertHerd),
     );
     send_relay(
         &sinks.relay_tx,

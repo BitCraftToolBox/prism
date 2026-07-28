@@ -187,8 +187,7 @@ pub async fn run_region(
                     let _ = drain.await;
                     return Ok(());
                 };
-                if let Err(e) =
-                    run_connection(&con, signal, &mut growth_sub_rx, &region.name).await
+                if let Err(e) = run_connection(&con, signal, &mut growth_sub_rx, &region.name).await
                 {
                     error!("[{}] connection ended with error: {:?}", region.name, e);
                 }

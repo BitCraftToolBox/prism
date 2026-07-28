@@ -37,6 +37,11 @@ pub enum RelayMsg {
         region_id: u8,
         rows: Vec<EnemyRow>,
     },
+    /// Snapshot-phase payload for herds in this region (static spawners).
+    ReplaceHerds {
+        region_id: u8,
+        rows: Vec<HerdRow>,
+    },
     ReplacePlayers {
         region_id: u8,
         rows: Vec<PlayerRow>,
@@ -61,6 +66,9 @@ pub enum RelayMsg {
     InsertResource(ResourceRow),
     InsertGrowthTimer(GrowthTimerRow),
     InsertEnemy(EnemyRow),
+    /// Live-phase delta: new herd spawn or an in-place change to a tracked
+    /// herd's projected fields (ai params id / crumb-trail validity).
+    UpsertHerd(HerdRow),
     UpsertPlayer(PlayerRow),
     UpsertPlayerState(PlayerStateRow),
     UpsertCrafts(Vec<CraftUpdateRow>),
@@ -78,6 +86,7 @@ pub enum RelayMsg {
 
     DeleteResource(u64),
     DeleteEnemy(u64),
+    DeleteHerd(u64),
 
     /// Live-phase delta: update location of an existing player or enemy.
     /// The relay module resolves which table to update.
@@ -124,6 +133,16 @@ pub struct GrowthTimerRow {
 pub struct EnemyRow {
     pub entity_id: u64,
     pub enemy_type: i32,
+    pub region_id: u8,
+    pub x: i32,
+    pub z: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct HerdRow {
+    pub entity_id: u64,
+    pub enemy_type: i32,
+    pub enemy_params_ai_desc_id: i32,
     pub region_id: u8,
     pub x: i32,
     pub z: i32,

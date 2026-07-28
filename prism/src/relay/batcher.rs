@@ -23,8 +23,8 @@ use log::{debug, error, info, warn};
 use metrics::{counter, histogram};
 use relay_bindings::{
     ClaimInfo, ClaimMeta, ClaimSupply, CraftContributionDelta, CraftPublicUpdate, CraftUpdate,
-    EnemyLocation, GrowthTimerUpdate, MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate,
-    PlayerState, RecipeMeta, ResourceLocation,
+    EnemyLocation, GrowthTimerUpdate, HerdLocation, MobileMoveUpdate, PlayerLocation,
+    PlayerRenameUpdate, PlayerState, RecipeMeta, ResourceLocation,
 };
 use relay_sdk::Timestamp;
 use tokio::sync::mpsc::Receiver;
@@ -33,7 +33,7 @@ use tokio::time::{Instant, interval_at};
 use super::connection::{RECONNECT_DELAY, RelayConnection};
 use super::{
     ClaimInfoRow, ClaimMetaRow, ClaimSupplyRow, CraftContributionDeltaRow, CraftPublicUpdateRow,
-    CraftUpdateRow, EnemyRow, GrowthTimerRow, MobileMoveRow, PlayerRenameRow, PlayerRow,
+    CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, MobileMoveRow, PlayerRenameRow, PlayerRow,
     PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow,
 };
 use crate::config::{Config, RelayConfig};
@@ -59,6 +59,8 @@ struct Batches {
     growth_timer_inserts: Vec<GrowthTimerUpdate>,
     enemy_inserts: Vec<EnemyLocation>,
     enemy_deletes: Vec<u64>,
+    herd_upserts: Vec<HerdLocation>,
+    herd_deletes: Vec<u64>,
     player_upserts: Vec<PlayerLocation>,
     player_deletes: Vec<u64>,
     player_state_upserts: Vec<PlayerState>,
@@ -95,6 +97,16 @@ fn to_enemy_location(r: &EnemyRow) -> EnemyLocation {
     EnemyLocation {
         entity_id: r.entity_id,
         enemy_type: r.enemy_type,
+        region_id: r.region_id,
+        x: r.x,
+        z: r.z,
+    }
+}
+fn to_herd_location(r: &HerdRow) -> HerdLocation {
+    HerdLocation {
+        entity_id: r.entity_id,
+        enemy_type: r.enemy_type,
+        enemy_params_ai_desc_id: r.enemy_params_ai_desc_id,
         region_id: r.region_id,
         x: r.x,
         z: r.z,
@@ -354,6 +366,17 @@ pub async fn run(
                             region_id,
                         );
                     }
+                    RelayMsg::ReplaceHerds { region_id, rows } => {
+                        flush_herd_batch(&conn, &mut batches);
+                        let relay_rows: Vec<HerdLocation> = rows.iter().map(to_herd_location).collect();
+                        bulk_replace_chunked(
+                            relay_rows,
+                            |chunk| conn.bulk_replace_herds(region_id, chunk, rows.len() as u32),
+                            |chunk| conn.upsert_herds(chunk),
+                            "herds",
+                            region_id,
+                        );
+                    }
                     RelayMsg::ReplacePlayers { region_id, rows } => {
                         flush_player_batch(&conn, &mut batches);
                         let relay_rows: Vec<PlayerLocation> = rows.iter().map(to_player_location).collect();
@@ -432,6 +455,14 @@ pub async fn run(
                     RelayMsg::DeleteEnemy(id) => {
                         batches.enemy_deletes.push(id);
                         if batches.enemy_deletes.len() >= MAX_BATCH { flush_enemy_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::UpsertHerd(row) => {
+                        batches.herd_upserts.push(to_herd_location(&row));
+                        if batches.herd_upserts.len() >= MAX_BATCH { flush_herd_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::DeleteHerd(id) => {
+                        batches.herd_deletes.push(id);
+                        if batches.herd_deletes.len() >= MAX_BATCH { flush_herd_batch(&conn, &mut batches); }
                     }
                     RelayMsg::UpsertPlayerState(row) => {
                         batches.player_state_upserts.push(to_player_state(&row));
@@ -516,9 +547,13 @@ pub async fn run(
             _ = enemy_tick.tick() => {
                 if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
                 histogram!("prism_relay_batch_depth", "pipeline" => "enemy")
-                    .record((batches.enemy_inserts.len() + batches.enemy_deletes.len()) as f64);
+                    .record((batches.enemy_inserts.len()
+                        + batches.enemy_deletes.len()
+                        + batches.herd_upserts.len()
+                        + batches.herd_deletes.len()) as f64);
                 let t = std::time::Instant::now();
                 flush_enemy_batch(&conn, &mut batches);
+                flush_herd_batch(&conn, &mut batches);
                 histogram!("prism_relay_flush_duration_seconds", "pipeline" => "enemy")
                     .record(t.elapsed().as_secs_f64());
             }
@@ -566,6 +601,7 @@ pub async fn run(
     flush_resource_batch(&conn, &mut batches);
     flush_growth_batch(&conn, &mut batches);
     flush_enemy_batch(&conn, &mut batches);
+    flush_herd_batch(&conn, &mut batches);
     flush_player_batch(&conn, &mut batches);
     flush_player_state_batch(&conn, &mut batches);
     flush_mobile_moves(&conn, &mut batches);
@@ -664,6 +700,27 @@ fn flush_enemy_batch(conn: &RelayConnection, batches: &mut Batches) {
             .increment(ids.len() as u64);
         if let Err(e) = conn.delete_enemies(ids) {
             warn!("relay: delete_enemies: {e:?}");
+        }
+    }
+}
+
+fn flush_herd_batch(conn: &RelayConnection, batches: &mut Batches) {
+    if !batches.herd_upserts.is_empty() {
+        let rows = std::mem::take(&mut batches.herd_upserts);
+        debug!("relay flush: upsert_herds count={}", rows.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "herd", "op" => "upsert")
+            .increment(rows.len() as u64);
+        if let Err(e) = conn.upsert_herds(rows) {
+            warn!("relay: upsert_herds: {e:?}");
+        }
+    }
+    if !batches.herd_deletes.is_empty() {
+        let ids = std::mem::take(&mut batches.herd_deletes);
+        debug!("relay flush: delete_herds count={}", ids.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "herd", "op" => "delete")
+            .increment(ids.len() as u64);
+        if let Err(e) = conn.delete_herds(ids) {
+            warn!("relay: delete_herds: {e:?}");
         }
     }
 }

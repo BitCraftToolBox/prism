@@ -7,7 +7,7 @@
 //! maintained across update batches, mirroring nodeindex's `consume()`.
 
 use crate::relay::{
-    ClaimInfoRow, ClaimMetaRow, ClaimSupplyRow, CraftUpdateRow, EnemyRow, GrowthTimerRow,
+    ClaimInfoRow, ClaimMetaRow, ClaimSupplyRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow,
     PlayerRow, PlayerStateRow, RecipeMetaRow, ResourceRow,
 };
 use hashbrown::{HashMap, HashSet};
@@ -25,6 +25,14 @@ pub struct RegionJoinState {
     pub resource_kind: HashMap<u64, i32>,
     /// entity_id → enemy_type (sync phase only; cleared by clear_live_caches)
     pub enemy_kind: HashMap<u64, i32>,
+    /// entity_id → herd sync data (sync phase only; cleared by clear_live_caches)
+    pub herd_kind: HashMap<u64, HerdSyncEntry>,
+    /// enemy_ai_params_desc id -> enemy_type. Populated from the
+    /// `enemy_ai_params_desc` subscription (Enemies pipeline) and used to
+    /// resolve the initial herd snapshot plus, in the live phase, newly
+    /// spawned herds (which may reference a type added by a game update).
+    /// Maintained in both phases and intentionally survives clear_live_caches.
+    pub enemy_ai_type_map: HashMap<i32, i32>,
     /// entity_id → username (sync phase only; cleared by clear_live_caches)
     pub player_username: HashMap<u64, String>,
     /// set of entity_ids currently signed in (sync phase only; cleared by clear_live_caches)
@@ -78,6 +86,16 @@ pub struct EntityLocation {
     pub x: i32,
     pub z: i32,
     pub dimension: u32,
+}
+
+/// Sync-phase cache of the herd fields needed to build a projected relay row:
+/// `enemy_ai_params_desc_id` resolves to `enemy_type` via `enemy_ai_type_map`,
+/// `crumb_trail_entity_id` (> 0 means this herd is attached to another and
+/// should be ignored, per game semantics).
+#[derive(Clone, Copy, Debug)]
+pub struct HerdSyncEntry {
+    pub enemy_ai_params_desc_id: i32,
+    pub crumb_trail_entity_id: u64,
 }
 
 /// The subset of `claim_local_state` fields we mirror into the relay.
@@ -154,6 +172,35 @@ impl RegionJoinState {
                 Some(EnemyRow {
                     entity_id: eid,
                     enemy_type: etype,
+                    region_id,
+                    x: loc.x,
+                    z: loc.z,
+                })
+            })
+            .collect()
+    }
+
+    /// Collect all known overworld, non-crumb-trailed herds with a resolvable
+    /// enemy type as relay rows for a bulk replace.
+    pub fn snapshot_herds(&self, region_id: u8) -> Vec<HerdRow> {
+        self.herd_kind
+            .iter()
+            .filter_map(|(&eid, entry)| {
+                if entry.crumb_trail_entity_id > 0 || entry.enemy_ai_params_desc_id == 0 {
+                    return None;
+                }
+                let enemy_type = *self.enemy_ai_type_map.get(&entry.enemy_ai_params_desc_id)?;
+                if enemy_type == 0 {
+                    return None;
+                }
+                let loc = self.last_location.get(&eid)?;
+                if loc.dimension != OVERWORLD_DIM {
+                    return None;
+                }
+                Some(HerdRow {
+                    entity_id: eid,
+                    enemy_type,
+                    enemy_params_ai_desc_id: entry.enemy_ai_params_desc_id,
                     region_id,
                     x: loc.x,
                     z: loc.z,
@@ -340,6 +387,7 @@ impl RegionJoinState {
         // Replace with empty collections — this drops the old allocations.
         self.resource_kind = HashMap::default();
         self.enemy_kind = HashMap::default();
+        self.herd_kind = HashMap::default();
         self.player_username = HashMap::default();
         self.player_signed_in = HashSet::default();
         self.growth_timers = HashMap::default();
@@ -356,6 +404,9 @@ impl RegionJoinState {
         //
         // resource_desc_tags is likewise retained: the live phase reads it to
         // decide which newly-inserted resources warrant a growth-timer sub.
+        //
+        // enemy_ai_type_map is likewise retained: the live phase needs it to
+        // resolve newly-spawned herds (see emit_deltas).
     }
 }
 

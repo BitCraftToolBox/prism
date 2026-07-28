@@ -349,7 +349,7 @@ fn tiles_dir_for(renderer: RendererKind, output_dir: &Path) -> PathBuf {
         RendererKind::Terrain => output_dir.join("maps").join("terrain").join("tiles"),
         RendererKind::Game => output_dir.join("maps").join("game").join("tiles"),
         RendererKind::Roads => output_dir.join("roads").join("tiles"),
-        RendererKind::Resources => output_dir.join("heatmaps").join("resources"),
+        RendererKind::Resources => output_dir.join("heatmaps"),
     }
 }
 

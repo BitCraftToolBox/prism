@@ -9,6 +9,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub mod apply_craft_progress_deltas_reducer;
 pub mod bulk_replace_claims_reducer;
 pub mod bulk_replace_enemies_reducer;
+pub mod bulk_replace_herds_reducer;
 pub mod bulk_replace_player_states_reducer;
 pub mod bulk_replace_players_reducer;
 pub mod bulk_replace_resources_reducer;
@@ -29,6 +30,7 @@ pub mod craft_public_update_type;
 pub mod craft_update_type;
 pub mod delete_claims_reducer;
 pub mod delete_enemies_reducer;
+pub mod delete_herds_reducer;
 pub mod delete_player_states_reducer;
 pub mod delete_players_reducer;
 pub mod delete_recipe_meta_reducer;
@@ -39,6 +41,8 @@ pub mod expiring_craft_type;
 pub mod growth_timer_type;
 pub mod growth_timer_update_type;
 pub mod growth_timers_table;
+pub mod herd_location_table;
+pub mod herd_location_type;
 pub mod init_relay_reducer;
 pub mod insert_enemies_reducer;
 pub mod insert_growth_timers_reducer;
@@ -63,6 +67,7 @@ pub mod toggle_public_reducer;
 pub mod upsert_claim_info_reducer;
 pub mod upsert_claim_supply_reducer;
 pub mod upsert_crafts_reducer;
+pub mod upsert_herds_reducer;
 pub mod upsert_player_states_reducer;
 pub mod upsert_players_reducer;
 pub mod upsert_recipe_meta_reducer;
@@ -70,6 +75,7 @@ pub mod upsert_recipe_meta_reducer;
 pub use apply_craft_progress_deltas_reducer::apply_craft_progress_deltas;
 pub use bulk_replace_claims_reducer::bulk_replace_claims;
 pub use bulk_replace_enemies_reducer::bulk_replace_enemies;
+pub use bulk_replace_herds_reducer::bulk_replace_herds;
 pub use bulk_replace_player_states_reducer::bulk_replace_player_states;
 pub use bulk_replace_players_reducer::bulk_replace_players;
 pub use bulk_replace_resources_reducer::bulk_replace_resources;
@@ -90,6 +96,7 @@ pub use craft_public_update_type::CraftPublicUpdate;
 pub use craft_update_type::CraftUpdate;
 pub use delete_claims_reducer::delete_claims;
 pub use delete_enemies_reducer::delete_enemies;
+pub use delete_herds_reducer::delete_herds;
 pub use delete_player_states_reducer::delete_player_states;
 pub use delete_players_reducer::delete_players;
 pub use delete_recipe_meta_reducer::delete_recipe_meta;
@@ -100,6 +107,8 @@ pub use expiring_craft_type::ExpiringCraft;
 pub use growth_timer_type::GrowthTimer;
 pub use growth_timer_update_type::GrowthTimerUpdate;
 pub use growth_timers_table::*;
+pub use herd_location_table::*;
+pub use herd_location_type::HerdLocation;
 pub use init_relay_reducer::init_relay;
 pub use insert_enemies_reducer::insert_enemies;
 pub use insert_growth_timers_reducer::insert_growth_timers;
@@ -124,6 +133,7 @@ pub use toggle_public_reducer::toggle_public;
 pub use upsert_claim_info_reducer::upsert_claim_info;
 pub use upsert_claim_supply_reducer::upsert_claim_supply;
 pub use upsert_crafts_reducer::upsert_crafts;
+pub use upsert_herds_reducer::upsert_herds;
 pub use upsert_player_states_reducer::upsert_player_states;
 pub use upsert_players_reducer::upsert_players;
 pub use upsert_recipe_meta_reducer::upsert_recipe_meta;
@@ -150,6 +160,11 @@ pub enum Reducer {
         rows: Vec<EnemyLocation>,
         total: u32,
     },
+    BulkReplaceHerds {
+        region_id: u8,
+        rows: Vec<HerdLocation>,
+        total: u32,
+    },
     BulkReplacePlayerStates {
         region_id: u8,
         rows: Vec<PlayerState>,
@@ -169,6 +184,9 @@ pub enum Reducer {
         entity_ids: Vec<u64>,
     },
     DeleteEnemies {
+        entity_ids: Vec<u64>,
+    },
+    DeleteHerds {
         entity_ids: Vec<u64>,
     },
     DeletePlayerStates {
@@ -220,6 +238,9 @@ pub enum Reducer {
     UpsertCrafts {
         rows: Vec<CraftUpdate>,
     },
+    UpsertHerds {
+        rows: Vec<HerdLocation>,
+    },
     UpsertPlayerStates {
         rows: Vec<PlayerState>,
     },
@@ -241,11 +262,13 @@ impl __sdk::Reducer for Reducer {
             Reducer::ApplyCraftProgressDeltas { .. } => "apply_craft_progress_deltas",
             Reducer::BulkReplaceClaims { .. } => "bulk_replace_claims",
             Reducer::BulkReplaceEnemies { .. } => "bulk_replace_enemies",
+            Reducer::BulkReplaceHerds { .. } => "bulk_replace_herds",
             Reducer::BulkReplacePlayerStates { .. } => "bulk_replace_player_states",
             Reducer::BulkReplacePlayers { .. } => "bulk_replace_players",
             Reducer::BulkReplaceResources { .. } => "bulk_replace_resources",
             Reducer::DeleteClaims { .. } => "delete_claims",
             Reducer::DeleteEnemies { .. } => "delete_enemies",
+            Reducer::DeleteHerds { .. } => "delete_herds",
             Reducer::DeletePlayerStates { .. } => "delete_player_states",
             Reducer::DeletePlayers { .. } => "delete_players",
             Reducer::DeleteRecipeMeta { .. } => "delete_recipe_meta",
@@ -263,6 +286,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::UpsertClaimInfo { .. } => "upsert_claim_info",
             Reducer::UpsertClaimSupply { .. } => "upsert_claim_supply",
             Reducer::UpsertCrafts { .. } => "upsert_crafts",
+            Reducer::UpsertHerds { .. } => "upsert_herds",
             Reducer::UpsertPlayerStates { .. } => "upsert_player_states",
             Reducer::UpsertPlayers { .. } => "upsert_players",
             Reducer::UpsertRecipeMeta { .. } => "upsert_recipe_meta",
@@ -293,6 +317,15 @@ impl __sdk::Reducer for Reducer {
                 rows,
                 total,
             } => __sats::bsatn::to_vec(&bulk_replace_enemies_reducer::BulkReplaceEnemiesArgs {
+                region_id: region_id.clone(),
+                rows: rows.clone(),
+                total: total.clone(),
+            }),
+            Reducer::BulkReplaceHerds {
+                region_id,
+                rows,
+                total,
+            } => __sats::bsatn::to_vec(&bulk_replace_herds_reducer::BulkReplaceHerdsArgs {
                 region_id: region_id.clone(),
                 rows: rows.clone(),
                 total: total.clone(),
@@ -333,6 +366,11 @@ impl __sdk::Reducer for Reducer {
             }
             Reducer::DeleteEnemies { entity_ids } => {
                 __sats::bsatn::to_vec(&delete_enemies_reducer::DeleteEnemiesArgs {
+                    entity_ids: entity_ids.clone(),
+                })
+            }
+            Reducer::DeleteHerds { entity_ids } => {
+                __sats::bsatn::to_vec(&delete_herds_reducer::DeleteHerdsArgs {
                     entity_ids: entity_ids.clone(),
                 })
             }
@@ -417,6 +455,9 @@ impl __sdk::Reducer for Reducer {
                     rows: rows.clone(),
                 })
             }
+            Reducer::UpsertHerds { rows } => {
+                __sats::bsatn::to_vec(&upsert_herds_reducer::UpsertHerdsArgs { rows: rows.clone() })
+            }
             Reducer::UpsertPlayerStates { rows } => {
                 __sats::bsatn::to_vec(&upsert_player_states_reducer::UpsertPlayerStatesArgs {
                     rows: rows.clone(),
@@ -449,6 +490,7 @@ pub struct DbUpdate {
     craft_progress: __sdk::TableUpdate<CraftProgress>,
     enemy_location: __sdk::TableUpdate<EnemyLocation>,
     growth_timers: __sdk::TableUpdate<GrowthTimer>,
+    herd_location: __sdk::TableUpdate<HerdLocation>,
     player_location: __sdk::TableUpdate<PlayerLocation>,
     player_state: __sdk::TableUpdate<PlayerState>,
     recipe_meta: __sdk::TableUpdate<RecipeMeta>,
@@ -485,6 +527,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "growth_timers" => db_update
                     .growth_timers
                     .append(growth_timers_table::parse_table_update(table_update)?),
+                "herd_location" => db_update
+                    .herd_location
+                    .append(herd_location_table::parse_table_update(table_update)?),
                 "player_location" => db_update
                     .player_location
                     .append(player_location_table::parse_table_update(table_update)?),
@@ -550,6 +595,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.growth_timers = cache
             .apply_diff_to_table::<GrowthTimer>("growth_timers", &self.growth_timers)
             .with_updates_by_pk(|row| &row.entity_id);
+        diff.herd_location = cache
+            .apply_diff_to_table::<HerdLocation>("herd_location", &self.herd_location)
+            .with_updates_by_pk(|row| &row.entity_id);
         diff.player_location = cache
             .apply_diff_to_table::<PlayerLocation>("player_location", &self.player_location)
             .with_updates_by_pk(|row| &row.entity_id);
@@ -592,6 +640,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "growth_timers" => db_update
                     .growth_timers
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "herd_location" => db_update
+                    .herd_location
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "player_location" => db_update
                     .player_location
@@ -642,6 +693,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "growth_timers" => db_update
                     .growth_timers
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "herd_location" => db_update
+                    .herd_location
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "player_location" => db_update
                     .player_location
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -677,6 +731,7 @@ pub struct AppliedDiff<'r> {
     craft_progress: __sdk::TableAppliedDiff<'r, CraftProgress>,
     enemy_location: __sdk::TableAppliedDiff<'r, EnemyLocation>,
     growth_timers: __sdk::TableAppliedDiff<'r, GrowthTimer>,
+    herd_location: __sdk::TableAppliedDiff<'r, HerdLocation>,
     player_location: __sdk::TableAppliedDiff<'r, PlayerLocation>,
     player_state: __sdk::TableAppliedDiff<'r, PlayerState>,
     recipe_meta: __sdk::TableAppliedDiff<'r, RecipeMeta>,
@@ -720,6 +775,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<GrowthTimer>(
             "growth_timers",
             &self.growth_timers,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<HerdLocation>(
+            "herd_location",
+            &self.herd_location,
             event,
         );
         callbacks.invoke_table_row_callbacks::<PlayerLocation>(
@@ -1406,6 +1466,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         craft_progress_table::register_table(client_cache);
         enemy_location_table::register_table(client_cache);
         growth_timers_table::register_table(client_cache);
+        herd_location_table::register_table(client_cache);
         player_location_table::register_table(client_cache);
         player_state_table::register_table(client_cache);
         recipe_meta_table::register_table(client_cache);
@@ -1420,6 +1481,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "craft_progress",
         "enemy_location",
         "growth_timers",
+        "herd_location",
         "player_location",
         "player_state",
         "recipe_meta",

@@ -10,25 +10,28 @@ use anyhow::{Result, anyhow};
 use log::{info, warn};
 use relay_bindings::{
     ClaimInfo, ClaimMeta, ClaimSupply, CraftContributionDelta, CraftPublicUpdate, CraftUpdate,
-    DbConnection, EnemyLocation, GrowthTimerUpdate, MobileMoveUpdate, PlayerLocation,
+    DbConnection, EnemyLocation, GrowthTimerUpdate, HerdLocation, MobileMoveUpdate, PlayerLocation,
     PlayerRenameUpdate, PlayerState, RecipeMeta, ResourceLocation,
     apply_craft_progress_deltas_reducer::apply_craft_progress_deltas,
     bulk_replace_claims_reducer::bulk_replace_claims,
     bulk_replace_enemies_reducer::bulk_replace_enemies,
+    bulk_replace_herds_reducer::bulk_replace_herds,
     bulk_replace_player_states_reducer::bulk_replace_player_states,
     bulk_replace_players_reducer::bulk_replace_players,
     bulk_replace_resources_reducer::bulk_replace_resources, delete_claims_reducer::delete_claims,
-    delete_enemies_reducer::delete_enemies, delete_player_states_reducer::delete_player_states,
-    delete_players_reducer::delete_players, delete_recipe_meta_reducer::delete_recipe_meta,
-    delete_resources_reducer::delete_resources, init_relay_reducer::init_relay,
-    insert_enemies_reducer::insert_enemies, insert_growth_timers_reducer::insert_growth_timers,
-    insert_resources_reducer::insert_resources, move_mobile_entities_reducer::move_mobile_entities,
-    rename_players_reducer::rename_players, schedule_craft_expiry_reducer::schedule_craft_expiry,
+    delete_enemies_reducer::delete_enemies, delete_herds_reducer::delete_herds,
+    delete_player_states_reducer::delete_player_states, delete_players_reducer::delete_players,
+    delete_recipe_meta_reducer::delete_recipe_meta, delete_resources_reducer::delete_resources,
+    init_relay_reducer::init_relay, insert_enemies_reducer::insert_enemies,
+    insert_growth_timers_reducer::insert_growth_timers, insert_resources_reducer::insert_resources,
+    move_mobile_entities_reducer::move_mobile_entities, rename_players_reducer::rename_players,
+    schedule_craft_expiry_reducer::schedule_craft_expiry,
     set_players_offline_reducer::set_players_offline,
     set_players_online_reducer::set_players_online, toggle_public_reducer::toggle_public,
     upsert_claim_info_reducer::upsert_claim_info, upsert_claim_supply_reducer::upsert_claim_supply,
-    upsert_crafts_reducer::upsert_crafts, upsert_player_states_reducer::upsert_player_states,
-    upsert_players_reducer::upsert_players, upsert_recipe_meta_reducer::upsert_recipe_meta,
+    upsert_crafts_reducer::upsert_crafts, upsert_herds_reducer::upsert_herds,
+    upsert_player_states_reducer::upsert_player_states, upsert_players_reducer::upsert_players,
+    upsert_recipe_meta_reducer::upsert_recipe_meta,
 };
 use relay_sdk::DbContext;
 use tokio::sync::oneshot;
@@ -170,6 +173,32 @@ impl RelayConnection {
         self.conn
             .reducers
             .insert_enemies(rows)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn bulk_replace_herds(
+        &self,
+        region_id: u8,
+        rows: Vec<HerdLocation>,
+        total: u32,
+    ) -> Result<()> {
+        self.conn
+            .reducers
+            .bulk_replace_herds(region_id, rows, total)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn upsert_herds(&self, rows: Vec<HerdLocation>) -> Result<()> {
+        self.conn
+            .reducers
+            .upsert_herds(rows)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn delete_herds(&self, ids: Vec<u64>) -> Result<()> {
+        self.conn
+            .reducers
+            .delete_herds(ids)
             .map_err(|e| anyhow!("{e:?}"))
     }
 
