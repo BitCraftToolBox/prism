@@ -30,6 +30,7 @@ pub struct ClaimInfo {
     pub marketplace: bool,
     pub waystone: bool,
     pub research: Vec<i32>,
+    #[default("")]
     pub name: String,
 }
 
