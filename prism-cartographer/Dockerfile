@@ -32,9 +32,11 @@ COPY prism-cartographer/Cargo.toml prism-cartographer/Cargo.toml
 RUN mkdir -p prism-cartographer/src && echo 'fn main() {}' > prism-cartographer/src/main.rs
 RUN cargo build --release --target x86_64-unknown-linux-musl -p prism-cartographer || true
 
-# Now copy real source and rebuild only the cartographer binary.
+# Now copy real sources and rebuild only the affected crates.
+COPY relay-bindings/src/ relay-bindings/src/
 COPY prism-cartographer/src/ prism-cartographer/src/
-RUN touch prism-cartographer/src/main.rs && \
+RUN cargo clean -p prism-cartographer -p relay_bindings && \
+    touch relay-bindings/src/lib.rs prism-cartographer/src/main.rs && \
     cargo build --release --target x86_64-unknown-linux-musl -p prism-cartographer && \
     strip target/x86_64-unknown-linux-musl/release/prism-cartographer
 
