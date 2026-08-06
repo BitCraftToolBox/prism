@@ -28,4 +28,4 @@ schedule = "0 50 * * * *"
 [[tasks]]
 renderer = "resources"
 # twice daily, shortly after roads, which dumps resource desc for us, and after normal maint time to catch new spawns
-schedule = "0 55 10,22 * * *"
+schedule = "0 55 14,2 * * *"
