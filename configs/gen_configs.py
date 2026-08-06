@@ -35,7 +35,7 @@ for (group, name), regions in region_groups.items():
     outfile = f"prism-{group}.toml"
     output = (before
               .replace("$OFFSET$", str(offset1))
-              .replace("$NAME$", "prism-" + (name or str(group)))
+              .replace("$NAME$", "prism-" + (name or str(group))))
     for region in regions:
         output += "\n[[upstream.regions]]\n"\
                   f"name = \"bitcraft-live-{region}\"\n"\
