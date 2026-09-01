@@ -1,6 +1,7 @@
 use crate::reducers::ensure_relay;
 use crate::tables::claims::{
-    ClaimInfo, ClaimMeta, ClaimSupply, claim_info, claim_meta, claim_supply,
+    ClaimInfo, ClaimMember, ClaimMeta, ClaimSupply, claim_info, claim_member, claim_meta,
+    claim_supply,
 };
 use spacetimedb::{ReducerContext, SpacetimeType, Table, reducer};
 
@@ -60,7 +61,10 @@ pub struct ClaimInfoUpdate {
 /// entity_ids not already present (rows are created by `bulk_replace_claims`
 /// on the sync→live transition).
 #[reducer]
-pub fn update_claim_info(ctx: &ReducerContext, updates: Vec<ClaimInfoUpdate>) -> Result<(), String> {
+pub fn update_claim_info(
+    ctx: &ReducerContext,
+    updates: Vec<ClaimInfoUpdate>,
+) -> Result<(), String> {
     ensure_relay(ctx)?;
     for update in updates {
         let Some(mut row) = ctx.db.claim_info().entity_id().find(update.entity_id) else {
@@ -90,7 +94,8 @@ pub fn upsert_claim_supply(ctx: &ReducerContext, rows: Vec<ClaimSupply>) -> Resu
     Ok(())
 }
 
-/// Live-phase: a claim was removed upstream — drop it from all three tables.
+/// Live-phase: a claim was removed upstream — drop it from all claim tables,
+/// including every membership row that pointed at it.
 #[reducer]
 pub fn delete_claims(ctx: &ReducerContext, entity_ids: Vec<u64>) -> Result<(), String> {
     ensure_relay(ctx)?;
@@ -98,6 +103,85 @@ pub fn delete_claims(ctx: &ReducerContext, entity_ids: Vec<u64>) -> Result<(), S
         ctx.db.claim_meta().entity_id().delete(id);
         ctx.db.claim_info().entity_id().delete(id);
         ctx.db.claim_supply().entity_id().delete(id);
+        ctx.db.claim_member().by_claim().delete(id);
+    }
+    Ok(())
+}
+
+/// Replace the entire claim-membership set for a region in one transaction.
+/// Used on the sync→live transition, mirroring `bulk_replace_claims`.
+#[reducer]
+pub fn bulk_replace_claim_members(
+    ctx: &ReducerContext,
+    region_id: u8,
+    rows: Vec<ClaimMember>,
+) -> Result<(), String> {
+    ensure_relay(ctx)?;
+    spacetimedb::log::info!(
+        "relay: processing bulk_replace_claim_members for region {:?}: members={}",
+        region_id,
+        rows.len(),
+    );
+    ctx.db.claim_member().by_region().delete(region_id);
+    for row in rows {
+        ctx.db.claim_member().insert(row);
+    }
+    Ok(())
+}
+
+/// Live-phase: upsert membership rows whose permissions (or claim/player
+/// association) changed, or that were newly added upstream.
+#[reducer]
+pub fn upsert_claim_members(ctx: &ReducerContext, rows: Vec<ClaimMember>) -> Result<(), String> {
+    ensure_relay(ctx)?;
+    for row in rows {
+        ctx.db.claim_member().entity_id().insert_or_update(row);
+    }
+    Ok(())
+}
+
+/// Live-phase: a member left / was removed from a claim upstream.
+#[reducer]
+pub fn delete_claim_members(ctx: &ReducerContext, entity_ids: Vec<u64>) -> Result<(), String> {
+    ensure_relay(ctx)?;
+    for id in entity_ids {
+        ctx.db.claim_member().entity_id().delete(id);
+    }
+    Ok(())
+}
+
+/// A claim's ownership as of upstream's latest `claim_state` row.
+#[derive(SpacetimeType)]
+pub struct ClaimOwnerUpdate {
+    pub claim_entity_id: u64,
+    /// `claim_state.owner_player_entity_id`; 0 when unknown/unowned.
+    pub owner_player_entity_id: u64,
+}
+
+/// Live-phase: a claim changed hands. Rather than make prism track every
+/// membership row to work out which `owner` flags moved, the claim's members
+/// are re-scanned here and each row's flag is set from the new owner id. A
+/// membership row that does not exist yet carries the right flag from the
+/// `upsert_claim_members` call that creates it.
+#[reducer]
+pub fn set_claim_owners(
+    ctx: &ReducerContext,
+    updates: Vec<ClaimOwnerUpdate>,
+) -> Result<(), String> {
+    ensure_relay(ctx)?;
+    for update in updates {
+        for mut row in ctx
+            .db
+            .claim_member()
+            .by_claim()
+            .filter(update.claim_entity_id)
+        {
+            let is_owner = row.player_entity_id == update.owner_player_entity_id;
+            if row.owner != is_owner {
+                row.owner = is_owner;
+                ctx.db.claim_member().entity_id().update(row);
+            }
+        }
     }
     Ok(())
 }

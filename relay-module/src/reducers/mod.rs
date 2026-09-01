@@ -8,6 +8,7 @@ pub mod crafts;
 pub mod enemies;
 pub mod mobs;
 pub mod players;
+pub mod regions;
 pub mod resources;
 
 pub(crate) fn ensure_relay(ctx: &ReducerContext) -> Result<(), String> {

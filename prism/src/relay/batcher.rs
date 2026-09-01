@@ -23,9 +23,11 @@ use log::{debug, error, info, warn};
 use metrics::{counter, histogram};
 use relay_bindings::{
     ClaimInfo, ClaimInfoField as BindingsClaimInfoField,
-    ClaimInfoUpdate as BindingsClaimInfoUpdate, ClaimMeta, ClaimSupply, CraftContributionDelta,
-    CraftPublicUpdate, CraftUpdate, EnemyLocation, GrowthTimerUpdate, HerdLocation, MobileMoveUpdate,
-    PlayerLocation, PlayerRenameUpdate, PlayerState, RecipeMeta, ResourceLocation,
+    ClaimInfoUpdate as BindingsClaimInfoUpdate, ClaimMember, ClaimMeta,
+    ClaimOwnerUpdate as BindingsClaimOwnerUpdate, ClaimSupply, CraftContributionDelta,
+    CraftPublicUpdate, CraftUpdate, EnemyLocation, GrowthTimerUpdate, HerdLocation,
+    MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate, PlayerState, RecipeMeta,
+    Region as BindingsRegion, ResourceLocation,
 };
 use relay_sdk::Timestamp;
 use tokio::sync::mpsc::Receiver;
@@ -33,10 +35,10 @@ use tokio::time::{Instant, interval_at};
 
 use super::connection::{RECONNECT_DELAY, RelayConnection};
 use super::{
-    ClaimInfoField, ClaimInfoRow, ClaimInfoUpdate, ClaimMetaRow, ClaimSupplyRow,
-    CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow,
-    HerdRow, MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RelayMsg,
-    ResourceRow,
+    ClaimInfoField, ClaimInfoRow, ClaimInfoUpdate, ClaimMemberRow, ClaimMetaRow, ClaimOwnerRow,
+    ClaimSupplyRow, CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow, EnemyRow,
+    GrowthTimerRow, HerdRow, MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow,
+    RecipeMetaRow, RegionRow, RelayMsg, ResourceRow,
 };
 use crate::config::{Config, RelayConfig};
 use crate::shutdown::SharedShutdown;
@@ -84,6 +86,9 @@ struct Batches {
     claim_info_updates: Vec<BindingsClaimInfoUpdate>,
     claim_supply_upserts: Vec<ClaimSupply>,
     claim_deletes: Vec<u64>,
+    claim_member_upserts: Vec<ClaimMember>,
+    claim_member_deletes: Vec<u64>,
+    claim_owner_updates: Vec<BindingsClaimOwnerUpdate>,
 }
 
 fn to_resource_location(r: &ResourceRow) -> ResourceLocation {
@@ -224,6 +229,38 @@ fn to_claim_info_update(r: &ClaimInfoUpdate) -> BindingsClaimInfoUpdate {
     BindingsClaimInfoUpdate {
         entity_id: r.entity_id,
         field: to_claim_info_field(&r.field),
+    }
+}
+fn to_claim_member(r: &ClaimMemberRow) -> ClaimMember {
+    ClaimMember {
+        entity_id: r.entity_id,
+        region_id: r.region_id,
+        claim_entity_id: r.claim_entity_id,
+        player_entity_id: r.player_entity_id,
+        build: r.build,
+        inventory: r.inventory,
+        officer: r.officer,
+        co_owner: r.co_owner,
+        owner: r.owner,
+    }
+}
+fn to_claim_owner_update(r: &ClaimOwnerRow) -> BindingsClaimOwnerUpdate {
+    BindingsClaimOwnerUpdate {
+        claim_entity_id: r.claim_entity_id,
+        owner_player_entity_id: r.owner_player_entity_id,
+    }
+}
+fn to_region(r: &RegionRow) -> BindingsRegion {
+    BindingsRegion {
+        id: r.id,
+        name: r.name.clone(),
+        min_chunk_x: r.min_chunk_x,
+        min_chunk_z: r.min_chunk_z,
+        width_chunks: r.width_chunks,
+        height_chunks: r.height_chunks,
+        initialized: r.initialized,
+        allow_players: r.allow_players,
+        allow_player_spawns: r.allow_player_spawns,
     }
 }
 fn to_claim_supply(r: &ClaimSupplyRow) -> ClaimSupply {
@@ -449,6 +486,17 @@ pub async fn run(
                             warn!("relay: bulk_replace_claims: {e:?}");
                         }
                     }
+                    RelayMsg::ReplaceClaimMembers { region_id, rows } => {
+                        flush_claim_member_batch(&conn, &mut batches);
+                        let relay_rows: Vec<ClaimMember> = rows.iter().map(to_claim_member).collect();
+                        bulk_replace_chunked(
+                            relay_rows,
+                            |chunk| conn.bulk_replace_claim_members(region_id, chunk),
+                            |chunk| conn.upsert_claim_members(chunk),
+                            "claim_members",
+                            region_id,
+                        );
+                    }
                     RelayMsg::InsertResource(row) => {
                         batches.resource_inserts.push(to_resource_location(&row));
                         if batches.resource_inserts.len() >= MAX_BATCH { flush_resource_batch(&conn, &mut batches); }
@@ -540,6 +588,29 @@ pub async fn run(
                         batches.claim_deletes.extend(ids);
                         if batches.claim_deletes.len() >= MAX_BATCH { flush_claim_batch(&conn, &mut batches); }
                     }
+                    RelayMsg::UpsertClaimMembers(rows) => {
+                        batches.claim_member_upserts.extend(rows.iter().map(to_claim_member));
+                        if batches.claim_member_upserts.len() >= MAX_BATCH { flush_claim_member_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::DeleteClaimMembers(ids) => {
+                        batches.claim_member_deletes.extend(ids);
+                        if batches.claim_member_deletes.len() >= MAX_BATCH { flush_claim_member_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::SetClaimOwners(rows) => {
+                        batches.claim_owner_updates.extend(rows.iter().map(to_claim_owner_update));
+                        if batches.claim_owner_updates.len() >= MAX_BATCH { flush_claim_member_batch(&conn, &mut batches); }
+                    }
+                    // Regions are a handful of near-static rows; batching them
+                    // would only delay them behind the claim tick.
+                    RelayMsg::UpsertRegions(rows) => {
+                        let relay_rows: Vec<BindingsRegion> = rows.iter().map(to_region).collect();
+                        info!("relay: upsert_regions count={}", relay_rows.len());
+                        counter!("prism_relay_flush_rows_total", "pipeline" => "region", "op" => "upsert")
+                            .increment(relay_rows.len() as u64);
+                        if let Err(e) = conn.upsert_regions(relay_rows) {
+                            warn!("relay: upsert_regions: {e:?}");
+                        }
+                    }
                 }
             }
 
@@ -608,7 +679,10 @@ pub async fn run(
                 histogram!("prism_relay_batch_depth", "pipeline" => "claim")
                     .record((batches.claim_info_updates.len()
                         + batches.claim_supply_upserts.len()
-                        + batches.claim_deletes.len()) as f64);
+                        + batches.claim_deletes.len()
+                        + batches.claim_member_upserts.len()
+                        + batches.claim_member_deletes.len()
+                        + batches.claim_owner_updates.len()) as f64);
                 let t = std::time::Instant::now();
                 flush_claim_batch(&conn, &mut batches);
                 histogram!("prism_relay_flush_duration_seconds", "pipeline" => "claim")
@@ -918,6 +992,9 @@ fn flush_claim_batch(conn: &RelayConnection, batches: &mut Batches) {
             warn!("relay: upsert_claim_supply: {e:?}");
         }
     }
+    // Membership before claim deletes: `delete_claims` cascades membership
+    // rows by claim, so draining members first keeps the delete authoritative.
+    flush_claim_member_batch(conn, batches);
     if !batches.claim_deletes.is_empty() {
         let ids = std::mem::take(&mut batches.claim_deletes);
         debug!("relay flush: delete_claims count={}", ids.len());
@@ -925,6 +1002,39 @@ fn flush_claim_batch(conn: &RelayConnection, batches: &mut Batches) {
             .increment(ids.len() as u64);
         if let Err(e) = conn.delete_claims(ids) {
             warn!("relay: delete_claims: {e:?}");
+        }
+    }
+}
+
+fn flush_claim_member_batch(conn: &RelayConnection, batches: &mut Batches) {
+    // Upserts, then owner updates, then deletes: an owner update re-derives the
+    // `owner` flag across a claim's existing membership rows, so it wants any
+    // rows added by this same flush to already be in place.
+    if !batches.claim_member_upserts.is_empty() {
+        let rows = std::mem::take(&mut batches.claim_member_upserts);
+        debug!("relay flush: upsert_claim_members count={}", rows.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "claim", "op" => "member_upsert")
+            .increment(rows.len() as u64);
+        if let Err(e) = conn.upsert_claim_members(rows) {
+            warn!("relay: upsert_claim_members: {e:?}");
+        }
+    }
+    if !batches.claim_owner_updates.is_empty() {
+        let updates = std::mem::take(&mut batches.claim_owner_updates);
+        debug!("relay flush: set_claim_owners count={}", updates.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "claim", "op" => "owner_update")
+            .increment(updates.len() as u64);
+        if let Err(e) = conn.set_claim_owners(updates) {
+            warn!("relay: set_claim_owners: {e:?}");
+        }
+    }
+    if !batches.claim_member_deletes.is_empty() {
+        let ids = std::mem::take(&mut batches.claim_member_deletes);
+        debug!("relay flush: delete_claim_members count={}", ids.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "claim", "op" => "member_delete")
+            .increment(ids.len() as u64);
+        if let Err(e) = conn.delete_claim_members(ids) {
+            warn!("relay: delete_claim_members: {e:?}");
         }
     }
 }

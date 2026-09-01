@@ -128,6 +128,9 @@ pub struct PipelinesConfig {
     pub crafts: bool,
     #[serde(default = "default_true")]
     pub claims: bool,
+    /// The four upstream region tables collated into the relay `region` table.
+    #[serde(default = "default_true")]
+    pub regions: bool,
     /// Resource `tag`s (matched against `resource_desc.tag`) whose resources
     /// should receive a targeted `resource_growth_timer` subscription when they
     /// spawn. Feeds the same relay `growth_timer` table as the legacy
@@ -147,6 +150,7 @@ impl PipelinesConfig {
             || self.players
             || self.crafts
             || self.claims
+            || self.regions
     }
 }
 

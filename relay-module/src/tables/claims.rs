@@ -49,3 +49,27 @@ pub struct ClaimSupply {
     pub num_tile_neighbors: u32,
     pub building_maintenance: f32,
 }
+
+/// Per-claim membership plus the upstream permission flags
+/// (`claim_member_state`). Keyed per-region like the other claim tables so a
+/// region's rows can be replaced wholesale on the sync→live transition.
+#[table(accessor = claim_member, public,
+    index(accessor = by_region, btree(columns = [region_id])),
+    index(accessor = by_claim, btree(columns = [claim_entity_id])),
+    index(accessor = by_player, btree(columns = [player_entity_id])),
+)]
+pub struct ClaimMember {
+    /// `claim_member_state.entity_id` - currently unused (could be `autoinc`), but keep in case
+    #[primary_key]
+    #[index(hash)]
+    pub entity_id: u64,
+    pub region_id: u8,
+    pub claim_entity_id: u64,
+    pub player_entity_id: u64,
+    pub build: bool,
+    pub inventory: bool,
+    pub officer: bool,
+    pub co_owner: bool,
+    /// Derived from `claim_state.owner_player_entity_id`.
+    pub owner: bool,
+}

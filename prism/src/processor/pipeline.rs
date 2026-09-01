@@ -1,4 +1,4 @@
-﻿//! Pipeline-specific transforms: turn a [`RegionUpdate`] into sink messages.
+//! Pipeline-specific transforms: turn a [`RegionUpdate`] into sink messages.
 //!
 //! During the initial subscription sync (Phase::Syncing) updates flow in as
 //! the server sends the initial snapshot rows, but not all pipelines have
@@ -9,17 +9,18 @@
 
 use super::ProcessorHandle;
 use super::join::{
-    ClaimLocalData, EntityLocation, HerdSyncEntry, JoinState, ProgressiveCraftState,
+    ClaimLocalData, ClaimMemberData, EntityLocation, HerdSyncEntry, JoinState,
+    ProgressiveCraftState,
 };
 use crate::history::HistoryMsg;
 use crate::relay::{
-    ClaimInfoField, ClaimInfoUpdate, ClaimSupplyRow, CraftContributionDeltaRow,
-    CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, PlayerRow, PlayerStateRow,
-    RecipeMetaRow, RelayMsg, ResourceRow,
+    ClaimInfoField, ClaimInfoUpdate, ClaimMemberRow, ClaimOwnerRow, ClaimSupplyRow,
+    CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow,
+    HerdRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow,
 };
 use crate::upstream::{GrowthTimerSubRequest, Phase, RegionUpdate};
 use anyhow::Result;
-use log::{debug, info};
+use log::{debug, info, warn};
 use metrics::counter;
 use std::collections::{HashMap, HashSet};
 use upstream_bindings::region::DbUpdate;
@@ -50,7 +51,7 @@ pub async fn handle(
     }
 
     // Always update join maps regardless of phase.
-    update_join_maps(state.region(region_id), &update);
+    update_join_maps(region_id, state.region(region_id), &update);
 
     // While syncing: update maps but hold all output until first Live update.
     if matches!(phase, Phase::Syncing) {
@@ -142,13 +143,33 @@ pub async fn handle(
             let claim_meta = region.snapshot_claim_meta(region_id);
             let claim_info = region.snapshot_claim_info(region_id);
             let claim_supply = region.snapshot_claim_supply(region_id);
-            counts.push(format!("claims={}", claim_meta.len()));
+            let claim_members = region.snapshot_claim_members(region_id);
+            counts.push(format!(
+                "claims={} claim_members={}",
+                claim_meta.len(),
+                claim_members.len()
+            ));
             relay_msgs.push(RelayMsg::ReplaceClaims {
                 region_id,
                 meta_rows: claim_meta,
                 info_rows: claim_info,
                 supply_rows: claim_supply,
             });
+            relay_msgs.push(RelayMsg::ReplaceClaimMembers {
+                region_id,
+                rows: claim_members,
+            });
+        }
+        // Nothing to replace for regions: the row is keyed by region id and
+        // this task owns exactly one, so an upsert is already a full replace.
+        // `region_info_dirty` stays false if no region rows ever arrived, in
+        // which case there is nothing worth publishing.
+        if pipelines.regions && std::mem::take(&mut region.region_info_dirty) {
+            counts.push("regions=1".to_string());
+            if region.region_info.name.is_empty() {
+                warn!("[{region_id}] no world_region_name_state row arrived");
+            }
+            relay_msgs.push(RelayMsg::UpsertRegions(vec![region.region_info.clone()]));
         }
 
         info!(
@@ -180,6 +201,17 @@ pub async fn handle(
         return Ok(());
     }
 
+    // Regions: `update_join_maps` already folded this batch into the projected
+    // row and flagged it if anything changed. Whole rows are sent — the table
+    // holds ~25 near-static rows world-wide, so targeted field updates would
+    // buy nothing.
+    if sinks.pipelines.regions && std::mem::take(&mut region.region_info_dirty) {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::UpsertRegions(vec![region.region_info.clone()])),
+        );
+    }
+
     // Normal delta mode: emit incremental upserts/deletes derived from this batch.
     emit_deltas(region_id, &update, &reducer, region, sinks);
     Ok(())
@@ -189,7 +221,7 @@ pub async fn handle(
 // Join-map updates (always run, regardless of phase)
 // ---------------------------------------------------------------------------
 
-fn update_join_maps(region: &mut super::join::RegionJoinState, update: &DbUpdate) {
+fn update_join_maps(region_id: u8, region: &mut super::join::RegionJoinState, update: &DbUpdate) {
     let live = region.is_live;
 
     // A claim_state delete that is not immediately reinserted purges every
@@ -209,8 +241,22 @@ fn update_join_maps(region: &mut super::join::RegionJoinState, update: &DbUpdate
             region.claim_marketplaces.remove(&eid);
             region.claim_waystones.remove(&eid);
             region.claim_local.remove(&eid);
+            region.claim_owners.remove(&eid);
+            region.claim_members.retain(|_, m| m.claim_entity_id != eid);
         }
     }
+
+    // claim entity_id -> owner player entity_id. Maintained in both phases (the
+    // delete side is handled above): the live phase reads it to stamp the
+    // derived `ClaimMember::owner` flag onto membership rows as members join or
+    // their permissions change.
+    for e in &update.claim_state.inserts {
+        region
+            .claim_owners
+            .insert(e.row.entity_id, e.row.owner_player_entity_id);
+    }
+
+    update_region_info(region_id, region, update);
 
     // resource_desc id → tag. Maintained in both phases: it arrives during the
     // sync phase (GrowthTimers pipeline) but is read in the live phase to
@@ -245,6 +291,14 @@ fn update_join_maps(region: &mut super::join::RegionJoinState, update: &DbUpdate
             region
                 .claim_names
                 .insert(e.row.entity_id, e.row.name.clone());
+        }
+        for e in &update.claim_member_state.deletes {
+            region.claim_members.remove(&e.row.entity_id);
+        }
+        for e in &update.claim_member_state.inserts {
+            region
+                .claim_members
+                .insert(e.row.entity_id, ClaimMemberData::from_row(&e.row));
         }
         for e in &update.claim_tech_state.deletes {
             region.claim_research.remove(&e.row.entity_id);
@@ -442,6 +496,55 @@ fn update_join_maps(region: &mut super::join::RegionJoinState, update: &DbUpdate
     }
 }
 
+/// Fold this batch's rows from the three upstream region tables into the
+/// region's projected `region` row, flagging it dirty if anything changed.
+/// Runs in both phases (see [`super::join::RegionJoinState::region_info`]).
+///
+/// The two `world_region_*` tables are singletons describing the region this
+/// connection is attached to, and their `id` column is not the region id (it is
+/// there for the global module's copy, and reads 0 here), so their sole row is
+/// taken as-is and `id` comes from config. `region_control_info` is different:
+/// it carries a row per *active* region — a region needs to know where it may
+/// send players — so only this region's row is folded in.
+///
+/// Deletes are handled manually as removed regions require infrastructure changes anyway.
+fn update_region_info(region_id: u8, region: &mut super::join::RegionJoinState, update: &DbUpdate) {
+    fn set<T: PartialEq>(dst: &mut T, src: T, dirty: &mut bool) {
+        if *dst != src {
+            *dst = src;
+            *dirty = true;
+        }
+    }
+
+    let info = &mut region.region_info;
+    let dirty = &mut region.region_info_dirty;
+
+    for e in &update.world_region_name_state.inserts {
+        info.id = region_id;
+        set(&mut info.name, e.row.player_facing_name.clone(), dirty);
+    }
+    for e in &update.world_region_state.inserts {
+        info.id = region_id;
+        set(&mut info.min_chunk_x, e.row.region_min_chunk_x, dirty);
+        set(&mut info.min_chunk_z, e.row.region_min_chunk_z, dirty);
+        set(&mut info.width_chunks, e.row.region_width_chunks, dirty);
+        set(&mut info.height_chunks, e.row.region_height_chunks, dirty);
+    }
+    for e in &update.region_control_info.inserts {
+        if e.row.region_id != region_id {
+            continue;
+        }
+        info.id = region_id;
+        set(&mut info.initialized, e.row.initialized, dirty);
+        set(&mut info.allow_players, e.row.allow_players, dirty);
+        set(
+            &mut info.allow_player_spawns,
+            e.row.allow_player_spawns,
+            dirty,
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Delta emission (Live phase only)
 // ---------------------------------------------------------------------------
@@ -513,11 +616,15 @@ fn emit_deltas(
             claim_state,
             claim_local_state,
             claim_tech_state,
+            claim_member_state,
             bank_state,
             marketplace_state,
             waystone_state,
             building_state,
             user_state,
+            world_region_name_state,
+            world_region_state,
+            region_control_info,
         ]
     );
 
@@ -543,6 +650,9 @@ fn emit_deltas(
     let mut claim_supply_upserts: Vec<ClaimSupplyRow> = Vec::new();
     let mut claim_info_updates: Vec<ClaimInfoUpdate> = Vec::new();
     let mut claim_deletes: Vec<u64> = Vec::new();
+    let mut claim_member_upserts: Vec<ClaimMemberRow> = Vec::new();
+    let mut claim_member_deletes: Vec<u64> = Vec::new();
+    let mut claim_owner_updates: Vec<ClaimOwnerRow> = Vec::new();
     let mut history_msgs: Vec<HistoryMsg> = Vec::new();
 
     // Resource deletes.
@@ -1002,6 +1112,59 @@ fn emit_deltas(
                 field: ClaimInfoField::Name(e.row.name.clone()),
             });
         }
+        // Ownership lives on `claim_member` as a derived flag, so an owner
+        // change is handed to the relay module as the claim's new owner id and
+        // it re-derives the flag across that claim's membership rows.
+        let owner_changed = update
+            .claim_state
+            .deletes
+            .iter()
+            .find(|d| d.row.entity_id == eid)
+            .map(|d| d.row.owner_player_entity_id != e.row.owner_player_entity_id)
+            .unwrap_or(true);
+        if owner_changed {
+            claim_owner_updates.push(ClaimOwnerRow {
+                claim_entity_id: eid,
+                owner_player_entity_id: e.row.owner_player_entity_id,
+            });
+        }
+    }
+
+    // Claim membership deltas. A delete without a matching insert means the
+    // member left (or was removed); an insert whose tracked fields differ from
+    // the matching delete is a permission change. Members of a claim that is
+    // itself being deleted are skipped — `delete_claims` drops them by claim.
+    for e in &update.claim_member_state.deletes {
+        if !update
+            .claim_member_state
+            .inserts
+            .iter()
+            .any(|ins| ins.row.entity_id == e.row.entity_id)
+        {
+            claim_member_deletes.push(e.row.entity_id);
+        }
+    }
+    for e in &update.claim_member_state.inserts {
+        let eid = e.row.entity_id;
+        if claim_delete_set.contains(&e.row.claim_entity_id) {
+            continue;
+        }
+        let new = ClaimMemberData::from_row(&e.row);
+        if let Some(prev) = update
+            .claim_member_state
+            .deletes
+            .iter()
+            .find(|d| d.row.entity_id == eid)
+            && ClaimMemberData::from_row(&prev.row) == new
+        {
+            // Update touched only untracked fields (e.g. user_name) — ignore.
+            continue;
+        }
+        // `claim_owners` was already advanced by update_join_maps, so a claim
+        // that changed hands in this same batch stamps the new owner here.
+        let owner =
+            region.claim_owners.get(&e.row.claim_entity_id) == Some(&e.row.player_entity_id);
+        claim_member_upserts.push(new.into_row(eid, region_id, owner));
     }
 
     let mut claim_research_changes: HashMap<u64, Vec<i32>> = HashMap::new();
@@ -1195,6 +1358,24 @@ fn emit_deltas(
         send_relay(
             &sinks.relay_tx,
             std::iter::once(RelayMsg::DeleteClaims(claim_deletes)),
+        );
+    }
+    if !claim_member_deletes.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::DeleteClaimMembers(claim_member_deletes)),
+        );
+    }
+    if !claim_member_upserts.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::UpsertClaimMembers(claim_member_upserts)),
+        );
+    }
+    if !claim_owner_updates.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::SetClaimOwners(claim_owner_updates)),
         );
     }
     send_history(&sinks.history_tx, history_msgs.into_iter());

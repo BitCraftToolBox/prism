@@ -9,16 +9,19 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use log::{info, warn};
 use relay_bindings::{
-    ClaimInfo, ClaimInfoUpdate, ClaimMeta, ClaimSupply, CraftContributionDelta, CraftPublicUpdate,
-    CraftUpdate, DbConnection, EnemyLocation, GrowthTimerUpdate, HerdLocation, MobileMoveUpdate, PlayerLocation,
-    PlayerRenameUpdate, PlayerState, RecipeMeta, ResourceLocation,
+    ClaimInfo, ClaimInfoUpdate, ClaimMember, ClaimMeta, ClaimOwnerUpdate, ClaimSupply,
+    CraftContributionDelta, CraftPublicUpdate, CraftUpdate, DbConnection, EnemyLocation,
+    GrowthTimerUpdate, HerdLocation, MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate,
+    PlayerState, RecipeMeta, Region, ResourceLocation,
     apply_craft_progress_deltas_reducer::apply_craft_progress_deltas,
+    bulk_replace_claim_members_reducer::bulk_replace_claim_members,
     bulk_replace_claims_reducer::bulk_replace_claims,
     bulk_replace_enemies_reducer::bulk_replace_enemies,
     bulk_replace_herds_reducer::bulk_replace_herds,
     bulk_replace_player_states_reducer::bulk_replace_player_states,
     bulk_replace_players_reducer::bulk_replace_players,
-    bulk_replace_resources_reducer::bulk_replace_resources, delete_claims_reducer::delete_claims,
+    bulk_replace_resources_reducer::bulk_replace_resources,
+    delete_claim_members_reducer::delete_claim_members, delete_claims_reducer::delete_claims,
     delete_enemies_reducer::delete_enemies, delete_herds_reducer::delete_herds,
     delete_player_states_reducer::delete_player_states, delete_players_reducer::delete_players,
     delete_recipe_meta_reducer::delete_recipe_meta, delete_resources_reducer::delete_resources,
@@ -26,11 +29,14 @@ use relay_bindings::{
     insert_growth_timers_reducer::insert_growth_timers, insert_resources_reducer::insert_resources,
     move_mobile_entities_reducer::move_mobile_entities, rename_players_reducer::rename_players,
     schedule_craft_expiry_reducer::schedule_craft_expiry,
-    set_players_offline_reducer::set_players_offline,
+    set_claim_owners_reducer::set_claim_owners, set_players_offline_reducer::set_players_offline,
     set_players_online_reducer::set_players_online, toggle_public_reducer::toggle_public,
-    update_claim_info_reducer::update_claim_info, upsert_claim_supply_reducer::upsert_claim_supply,
-    upsert_crafts_reducer::upsert_crafts, upsert_herds_reducer::upsert_herds, upsert_player_states_reducer::upsert_player_states,
+    update_claim_info_reducer::update_claim_info,
+    upsert_claim_members_reducer::upsert_claim_members,
+    upsert_claim_supply_reducer::upsert_claim_supply, upsert_crafts_reducer::upsert_crafts,
+    upsert_herds_reducer::upsert_herds, upsert_player_states_reducer::upsert_player_states,
     upsert_players_reducer::upsert_players, upsert_recipe_meta_reducer::upsert_recipe_meta,
+    upsert_regions_reducer::upsert_regions,
 };
 use relay_sdk::DbContext;
 use tokio::sync::oneshot;
@@ -363,6 +369,41 @@ impl RelayConnection {
         self.conn
             .reducers
             .delete_claims(entity_ids)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn bulk_replace_claim_members(&self, region_id: u8, rows: Vec<ClaimMember>) -> Result<()> {
+        self.conn
+            .reducers
+            .bulk_replace_claim_members(region_id, rows)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn upsert_claim_members(&self, rows: Vec<ClaimMember>) -> Result<()> {
+        self.conn
+            .reducers
+            .upsert_claim_members(rows)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn delete_claim_members(&self, entity_ids: Vec<u64>) -> Result<()> {
+        self.conn
+            .reducers
+            .delete_claim_members(entity_ids)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn set_claim_owners(&self, updates: Vec<ClaimOwnerUpdate>) -> Result<()> {
+        self.conn
+            .reducers
+            .set_claim_owners(updates)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn upsert_regions(&self, rows: Vec<Region>) -> Result<()> {
+        self.conn
+            .reducers
+            .upsert_regions(rows)
             .map_err(|e| anyhow!("{e:?}"))
     }
 }

@@ -26,16 +26,18 @@ generate-map-bindings path="../bitcraftmap/src/relay-bindings":
     spacetime version use 2.4.0
     spacetime generate -y --lang ts --out-dir {{path}} --module-path relay-module
 
+# Regen bindings for brico's frontend (live companion tools).
+generate-brico-bindings path="../brico/frontend/src/relay":
+    spacetime version use 2.4.0
+    spacetime generate -y --lang ts --out-dir {{path}} --module-path relay-module
+
 # --- prism workspace ---
 
 build:
-    cargo build --workspace
-
-run:
-    cargo run -p prism
+    cargo build --release --workspace
 
 fmt:
     cargo fmt -p prism -p prism-cartographer # don't format bindings
 
 clippy:
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --release --workspace --all-targets -- -D warnings

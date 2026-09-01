@@ -9,24 +9,28 @@ fn timers(ctx: &mut HandlerContext, request: Request) -> Response {
     let url = url::Url::parse(request.uri().to_string().as_str());
     let params: std::collections::HashMap<String, String> = url
         .ok()
-        .map(|u| u.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect())
+        .map(|u| {
+            u.query_pairs()
+                .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                .collect()
+        })
         .unwrap_or_default();
 
-    let resource_ids: Option<Vec<i32>> = params.get("resource").map(|r| {
-        r.split(',').filter_map(|s| s.trim().parse().ok()).collect()
-    });
+    let resource_ids: Option<Vec<i32>> = params
+        .get("resource")
+        .map(|r| r.split(',').filter_map(|s| s.trim().parse().ok()).collect());
 
-    let region_ids: Option<Vec<u8>> = params.get("region").map(|r| {
-        r.split(',').filter_map(|s| s.trim().parse().ok()).collect()
-    });
+    let region_ids: Option<Vec<u8>> = params
+        .get("region")
+        .map(|r| r.split(',').filter_map(|s| s.trim().parse().ok()).collect());
 
     let rows = ctx.with_tx(|tx| {
         tx.db
             .growth_timers()
             .iter()
             .filter(|t| {
-                resource_ids.as_ref().map_or(true, |ri| ri.contains(&t.resource_id))
-                    && region_ids.as_ref().map_or(true, |rs| rs.contains(&t.region_id))
+                resource_ids.as_ref().is_none_or(|ri| ri.contains(&t.resource_id))
+                    && region_ids.as_ref().is_none_or(|rs| rs.contains(&t.region_id))
             })
             .map(|t| {
                 serde_json::json!({
@@ -126,5 +130,7 @@ fn players(ctx: &mut HandlerContext, request: Request) -> Response {
 
 #[spacetimedb::http::router]
 fn router() -> Router {
-    Router::new().get("/players", players).get("/timers", timers)
+    Router::new()
+        .get("/players", players)
+        .get("/timers", timers)
 }

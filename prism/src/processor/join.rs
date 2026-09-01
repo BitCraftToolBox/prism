@@ -7,8 +7,8 @@
 //! maintained across update batches, mirroring nodeindex's `consume()`.
 
 use crate::relay::{
-    ClaimInfoRow, ClaimMetaRow, ClaimSupplyRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow,
-    PlayerRow, PlayerStateRow, RecipeMetaRow, ResourceRow,
+    ClaimInfoRow, ClaimMemberRow, ClaimMetaRow, ClaimSupplyRow, CraftUpdateRow, EnemyRow,
+    GrowthTimerRow, HerdRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RegionRow, ResourceRow,
 };
 use hashbrown::{HashMap, HashSet};
 use upstream_bindings::region::CraftingRecipeDesc;
@@ -85,6 +85,67 @@ pub struct RegionJoinState {
     /// claim entity_ids that currently have a waystone (sync phase only;
     /// cleared by clear_live_caches).
     pub claim_waystones: HashSet<u64>,
+    /// claim entity_id -> owner player entity_id. Maintained in both phases and
+    /// intentionally survives clear_live_caches: `ClaimMember::owner` is derived
+    /// from `claim_state`, so the live phase needs this to stamp the flag onto
+    /// membership rows as members join or their permissions change. One u64 pair
+    /// per claim, so retaining it is cheap.
+    pub claim_owners: HashMap<u64, u64>,
+    /// claim_member_state entity_id -> membership row (sync phase only;
+    /// cleared by clear_live_caches). Live-phase membership changes are
+    /// emitted as upserts/deletes directly from the update batch.
+    pub claim_members: HashMap<u64, ClaimMemberData>,
+    /// This region's projected `region` row, folded from the three upstream
+    /// region tables. Maintained in both phases and intentionally survives
+    /// clear_live_caches: there are only ~25 regions world-wide and the data is
+    /// near-static, so holding the whole row lets a change to any one of those
+    /// tables be emitted as one complete row.
+    pub region_info: RegionRow,
+    /// Set when `region_info` changed and the new row has not been emitted yet.
+    pub region_info_dirty: bool,
+}
+
+/// The subset of `claim_member_state` fields mirrored into the relay.
+/// `user_name` is deliberately excluded — player names already live in the
+/// relay `player_state` table, which is the source of truth in prism.
+/// (BitCraft has to mirror renames across multiple tables instead.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClaimMemberData {
+    pub claim_entity_id: u64,
+    pub player_entity_id: u64,
+    pub build: bool,
+    pub inventory: bool,
+    pub officer: bool,
+    pub co_owner: bool,
+}
+
+impl ClaimMemberData {
+    pub fn from_row(row: &upstream_bindings::region::ClaimMemberState) -> Self {
+        Self {
+            claim_entity_id: row.claim_entity_id,
+            player_entity_id: row.player_entity_id,
+            build: row.build_permission,
+            inventory: row.inventory_permission,
+            officer: row.officer_permission,
+            co_owner: row.co_owner_permission,
+        }
+    }
+
+    /// `owner` is not an upstream permission — it is derived from
+    /// `claim_state.owner_player_entity_id` and passed in by the caller.
+    pub fn into_row(self, entity_id: u64, region_id: u8, owner: bool) -> ClaimMemberRow {
+        ClaimMemberRow {
+            entity_id,
+            region_id,
+            claim_entity_id: self.claim_entity_id,
+            player_entity_id: self.player_entity_id,
+            build: self.build,
+            inventory: self.inventory,
+            officer: self.officer,
+            co_owner: self.co_owner,
+            owner,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -347,6 +408,18 @@ impl RegionJoinState {
             .collect()
     }
 
+    /// Collect all known claim memberships as relay rows for a bulk replace.
+    pub fn snapshot_claim_members(&self, region_id: u8) -> Vec<ClaimMemberRow> {
+        self.claim_members
+            .iter()
+            .map(|(&eid, data)| {
+                let owner =
+                    self.claim_owners.get(&data.claim_entity_id) == Some(&data.player_entity_id);
+                data.into_row(eid, region_id, owner)
+            })
+            .collect()
+    }
+
     /// Collect all known claims' supply/upkeep numbers as relay rows.
     pub fn snapshot_claim_supply(&self, region_id: u8) -> Vec<ClaimSupplyRow> {
         self.claim_local
@@ -396,12 +469,20 @@ impl RegionJoinState {
         self.claim_banks = HashSet::default();
         self.claim_marketplaces = HashSet::default();
         self.claim_waystones = HashSet::default();
+        // claim_members is only needed to build the initial coherent
+        // claim_member snapshot; live-phase changes are emitted as upserts /
+        // deletes derived directly from update batches.
+        self.claim_members = HashMap::default();
 
         // resource_desc_tags is retained: the live phase reads it to
         // decide which newly-inserted resources warrant a growth-timer sub.
         //
         // enemy_ai_type_map is likewise retained: the live phase needs it to
         // resolve newly-spawned herds (see emit_deltas).
+        //
+        // claim_owners and region_info are likewise retained: both are small
+        // and both are read in the live phase (to derive `ClaimMember::owner`
+        // and to emit whole `region` rows respectively).
     }
 }
 

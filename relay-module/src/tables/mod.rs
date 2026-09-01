@@ -4,6 +4,7 @@ pub mod claims;
 pub mod crafts;
 pub mod enemies;
 pub mod players;
+pub mod regions;
 pub mod resources;
 
 /// Single-row config table holding the identity of the authorized relay client.

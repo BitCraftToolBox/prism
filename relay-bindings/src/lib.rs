@@ -7,6 +7,7 @@
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 pub mod apply_craft_progress_deltas_reducer;
+pub mod bulk_replace_claim_members_reducer;
 pub mod bulk_replace_claims_reducer;
 pub mod bulk_replace_enemies_reducer;
 pub mod bulk_replace_herds_reducer;
@@ -17,8 +18,11 @@ pub mod claim_info_field_type;
 pub mod claim_info_table;
 pub mod claim_info_type;
 pub mod claim_info_update_type;
+pub mod claim_member_table;
+pub mod claim_member_type;
 pub mod claim_meta_table;
 pub mod claim_meta_type;
+pub mod claim_owner_update_type;
 pub mod claim_supply_table;
 pub mod claim_supply_type;
 pub mod craft_contribution_delta_type;
@@ -30,6 +34,7 @@ pub mod craft_progress_table;
 pub mod craft_progress_type;
 pub mod craft_public_update_type;
 pub mod craft_update_type;
+pub mod delete_claim_members_reducer;
 pub mod delete_claims_reducer;
 pub mod delete_enemies_reducer;
 pub mod delete_herds_reducer;
@@ -58,23 +63,29 @@ pub mod player_state_table;
 pub mod player_state_type;
 pub mod recipe_meta_table;
 pub mod recipe_meta_type;
+pub mod region_table;
+pub mod region_type;
 pub mod relay_config_type;
 pub mod rename_players_reducer;
 pub mod resource_location_table;
 pub mod resource_location_type;
 pub mod schedule_craft_expiry_reducer;
+pub mod set_claim_owners_reducer;
 pub mod set_players_offline_reducer;
 pub mod set_players_online_reducer;
 pub mod toggle_public_reducer;
 pub mod update_claim_info_reducer;
+pub mod upsert_claim_members_reducer;
 pub mod upsert_claim_supply_reducer;
 pub mod upsert_crafts_reducer;
 pub mod upsert_herds_reducer;
 pub mod upsert_player_states_reducer;
 pub mod upsert_players_reducer;
 pub mod upsert_recipe_meta_reducer;
+pub mod upsert_regions_reducer;
 
 pub use apply_craft_progress_deltas_reducer::apply_craft_progress_deltas;
+pub use bulk_replace_claim_members_reducer::bulk_replace_claim_members;
 pub use bulk_replace_claims_reducer::bulk_replace_claims;
 pub use bulk_replace_enemies_reducer::bulk_replace_enemies;
 pub use bulk_replace_herds_reducer::bulk_replace_herds;
@@ -85,8 +96,11 @@ pub use claim_info_field_type::ClaimInfoField;
 pub use claim_info_table::*;
 pub use claim_info_type::ClaimInfo;
 pub use claim_info_update_type::ClaimInfoUpdate;
+pub use claim_member_table::*;
+pub use claim_member_type::ClaimMember;
 pub use claim_meta_table::*;
 pub use claim_meta_type::ClaimMeta;
+pub use claim_owner_update_type::ClaimOwnerUpdate;
 pub use claim_supply_table::*;
 pub use claim_supply_type::ClaimSupply;
 pub use craft_contribution_delta_type::CraftContributionDelta;
@@ -98,6 +112,7 @@ pub use craft_progress_table::*;
 pub use craft_progress_type::CraftProgress;
 pub use craft_public_update_type::CraftPublicUpdate;
 pub use craft_update_type::CraftUpdate;
+pub use delete_claim_members_reducer::delete_claim_members;
 pub use delete_claims_reducer::delete_claims;
 pub use delete_enemies_reducer::delete_enemies;
 pub use delete_herds_reducer::delete_herds;
@@ -126,21 +141,26 @@ pub use player_state_table::*;
 pub use player_state_type::PlayerState;
 pub use recipe_meta_table::*;
 pub use recipe_meta_type::RecipeMeta;
+pub use region_table::*;
+pub use region_type::Region;
 pub use relay_config_type::RelayConfig;
 pub use rename_players_reducer::rename_players;
 pub use resource_location_table::*;
 pub use resource_location_type::ResourceLocation;
 pub use schedule_craft_expiry_reducer::schedule_craft_expiry;
+pub use set_claim_owners_reducer::set_claim_owners;
 pub use set_players_offline_reducer::set_players_offline;
 pub use set_players_online_reducer::set_players_online;
 pub use toggle_public_reducer::toggle_public;
 pub use update_claim_info_reducer::update_claim_info;
+pub use upsert_claim_members_reducer::upsert_claim_members;
 pub use upsert_claim_supply_reducer::upsert_claim_supply;
 pub use upsert_crafts_reducer::upsert_crafts;
 pub use upsert_herds_reducer::upsert_herds;
 pub use upsert_player_states_reducer::upsert_player_states;
 pub use upsert_players_reducer::upsert_players;
 pub use upsert_recipe_meta_reducer::upsert_recipe_meta;
+pub use upsert_regions_reducer::upsert_regions;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -152,6 +172,10 @@ pub use upsert_recipe_meta_reducer::upsert_recipe_meta;
 pub enum Reducer {
     ApplyCraftProgressDeltas {
         deltas: Vec<CraftContributionDelta>,
+    },
+    BulkReplaceClaimMembers {
+        region_id: u8,
+        rows: Vec<ClaimMember>,
     },
     BulkReplaceClaims {
         region_id: u8,
@@ -183,6 +207,9 @@ pub enum Reducer {
         region_id: u8,
         rows: Vec<ResourceLocation>,
         total: u32,
+    },
+    DeleteClaimMembers {
+        entity_ids: Vec<u64>,
     },
     DeleteClaims {
         entity_ids: Vec<u64>,
@@ -224,6 +251,9 @@ pub enum Reducer {
     ScheduleCraftExpiry {
         craft_ids: Vec<u64>,
     },
+    SetClaimOwners {
+        updates: Vec<ClaimOwnerUpdate>,
+    },
     SetPlayersOffline {
         entity_ids: Vec<u64>,
     },
@@ -235,6 +265,9 @@ pub enum Reducer {
     },
     UpdateClaimInfo {
         updates: Vec<ClaimInfoUpdate>,
+    },
+    UpsertClaimMembers {
+        rows: Vec<ClaimMember>,
     },
     UpsertClaimSupply {
         rows: Vec<ClaimSupply>,
@@ -254,6 +287,9 @@ pub enum Reducer {
     UpsertRecipeMeta {
         rows: Vec<RecipeMeta>,
     },
+    UpsertRegions {
+        rows: Vec<Region>,
+    },
 }
 
 impl __sdk::InModule for Reducer {
@@ -264,12 +300,14 @@ impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
             Reducer::ApplyCraftProgressDeltas { .. } => "apply_craft_progress_deltas",
+            Reducer::BulkReplaceClaimMembers { .. } => "bulk_replace_claim_members",
             Reducer::BulkReplaceClaims { .. } => "bulk_replace_claims",
             Reducer::BulkReplaceEnemies { .. } => "bulk_replace_enemies",
             Reducer::BulkReplaceHerds { .. } => "bulk_replace_herds",
             Reducer::BulkReplacePlayerStates { .. } => "bulk_replace_player_states",
             Reducer::BulkReplacePlayers { .. } => "bulk_replace_players",
             Reducer::BulkReplaceResources { .. } => "bulk_replace_resources",
+            Reducer::DeleteClaimMembers { .. } => "delete_claim_members",
             Reducer::DeleteClaims { .. } => "delete_claims",
             Reducer::DeleteEnemies { .. } => "delete_enemies",
             Reducer::DeleteHerds { .. } => "delete_herds",
@@ -284,16 +322,19 @@ impl __sdk::Reducer for Reducer {
             Reducer::MoveMobileEntities { .. } => "move_mobile_entities",
             Reducer::RenamePlayers { .. } => "rename_players",
             Reducer::ScheduleCraftExpiry { .. } => "schedule_craft_expiry",
+            Reducer::SetClaimOwners { .. } => "set_claim_owners",
             Reducer::SetPlayersOffline { .. } => "set_players_offline",
             Reducer::SetPlayersOnline { .. } => "set_players_online",
             Reducer::TogglePublic { .. } => "toggle_public",
             Reducer::UpdateClaimInfo { .. } => "update_claim_info",
+            Reducer::UpsertClaimMembers { .. } => "upsert_claim_members",
             Reducer::UpsertClaimSupply { .. } => "upsert_claim_supply",
             Reducer::UpsertCrafts { .. } => "upsert_crafts",
             Reducer::UpsertHerds { .. } => "upsert_herds",
             Reducer::UpsertPlayerStates { .. } => "upsert_player_states",
             Reducer::UpsertPlayers { .. } => "upsert_players",
             Reducer::UpsertRecipeMeta { .. } => "upsert_recipe_meta",
+            Reducer::UpsertRegions { .. } => "upsert_regions",
             _ => unreachable!(),
         }
     }
@@ -303,6 +344,12 @@ impl __sdk::Reducer for Reducer {
             Reducer::ApplyCraftProgressDeltas { deltas } => __sats::bsatn::to_vec(
                 &apply_craft_progress_deltas_reducer::ApplyCraftProgressDeltasArgs {
                     deltas: deltas.clone(),
+                },
+            ),
+            Reducer::BulkReplaceClaimMembers { region_id, rows } => __sats::bsatn::to_vec(
+                &bulk_replace_claim_members_reducer::BulkReplaceClaimMembersArgs {
+                    region_id: region_id.clone(),
+                    rows: rows.clone(),
                 },
             ),
             Reducer::BulkReplaceClaims {
@@ -363,6 +410,11 @@ impl __sdk::Reducer for Reducer {
                 rows: rows.clone(),
                 total: total.clone(),
             }),
+            Reducer::DeleteClaimMembers { entity_ids } => {
+                __sats::bsatn::to_vec(&delete_claim_members_reducer::DeleteClaimMembersArgs {
+                    entity_ids: entity_ids.clone(),
+                })
+            }
             Reducer::DeleteClaims { entity_ids } => {
                 __sats::bsatn::to_vec(&delete_claims_reducer::DeleteClaimsArgs {
                     entity_ids: entity_ids.clone(),
@@ -429,6 +481,11 @@ impl __sdk::Reducer for Reducer {
                     craft_ids: craft_ids.clone(),
                 })
             }
+            Reducer::SetClaimOwners { updates } => {
+                __sats::bsatn::to_vec(&set_claim_owners_reducer::SetClaimOwnersArgs {
+                    updates: updates.clone(),
+                })
+            }
             Reducer::SetPlayersOffline { entity_ids } => {
                 __sats::bsatn::to_vec(&set_players_offline_reducer::SetPlayersOfflineArgs {
                     entity_ids: entity_ids.clone(),
@@ -447,6 +504,11 @@ impl __sdk::Reducer for Reducer {
             Reducer::UpdateClaimInfo { updates } => {
                 __sats::bsatn::to_vec(&update_claim_info_reducer::UpdateClaimInfoArgs {
                     updates: updates.clone(),
+                })
+            }
+            Reducer::UpsertClaimMembers { rows } => {
+                __sats::bsatn::to_vec(&upsert_claim_members_reducer::UpsertClaimMembersArgs {
+                    rows: rows.clone(),
                 })
             }
             Reducer::UpsertClaimSupply { rows } => {
@@ -477,6 +539,11 @@ impl __sdk::Reducer for Reducer {
                     rows: rows.clone(),
                 })
             }
+            Reducer::UpsertRegions { rows } => {
+                __sats::bsatn::to_vec(&upsert_regions_reducer::UpsertRegionsArgs {
+                    rows: rows.clone(),
+                })
+            }
             _ => unreachable!(),
         }
     }
@@ -487,6 +554,7 @@ impl __sdk::Reducer for Reducer {
 #[doc(hidden)]
 pub struct DbUpdate {
     claim_info: __sdk::TableUpdate<ClaimInfo>,
+    claim_member: __sdk::TableUpdate<ClaimMember>,
     claim_meta: __sdk::TableUpdate<ClaimMeta>,
     claim_supply: __sdk::TableUpdate<ClaimSupply>,
     craft_contribution: __sdk::TableUpdate<CraftContribution>,
@@ -498,6 +566,7 @@ pub struct DbUpdate {
     player_location: __sdk::TableUpdate<PlayerLocation>,
     player_state: __sdk::TableUpdate<PlayerState>,
     recipe_meta: __sdk::TableUpdate<RecipeMeta>,
+    region: __sdk::TableUpdate<Region>,
     resource_location: __sdk::TableUpdate<ResourceLocation>,
 }
 
@@ -510,6 +579,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "claim_info" => db_update
                     .claim_info
                     .append(claim_info_table::parse_table_update(table_update)?),
+                "claim_member" => db_update
+                    .claim_member
+                    .append(claim_member_table::parse_table_update(table_update)?),
                 "claim_meta" => db_update
                     .claim_meta
                     .append(claim_meta_table::parse_table_update(table_update)?),
@@ -543,6 +615,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "recipe_meta" => db_update
                     .recipe_meta
                     .append(recipe_meta_table::parse_table_update(table_update)?),
+                "region" => db_update
+                    .region
+                    .append(region_table::parse_table_update(table_update)?),
                 "resource_location" => db_update
                     .resource_location
                     .append(resource_location_table::parse_table_update(table_update)?),
@@ -574,6 +649,9 @@ impl __sdk::DbUpdate for DbUpdate {
 
         diff.claim_info = cache
             .apply_diff_to_table::<ClaimInfo>("claim_info", &self.claim_info)
+            .with_updates_by_pk(|row| &row.entity_id);
+        diff.claim_member = cache
+            .apply_diff_to_table::<ClaimMember>("claim_member", &self.claim_member)
             .with_updates_by_pk(|row| &row.entity_id);
         diff.claim_meta = cache
             .apply_diff_to_table::<ClaimMeta>("claim_meta", &self.claim_meta)
@@ -611,6 +689,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.recipe_meta = cache
             .apply_diff_to_table::<RecipeMeta>("recipe_meta", &self.recipe_meta)
             .with_updates_by_pk(|row| &row.id);
+        diff.region = cache
+            .apply_diff_to_table::<Region>("region", &self.region)
+            .with_updates_by_pk(|row| &row.id);
         diff.resource_location = cache
             .apply_diff_to_table::<ResourceLocation>("resource_location", &self.resource_location)
             .with_updates_by_pk(|row| &row.entity_id);
@@ -623,6 +704,9 @@ impl __sdk::DbUpdate for DbUpdate {
             match &table_rows.table[..] {
                 "claim_info" => db_update
                     .claim_info
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "claim_member" => db_update
+                    .claim_member
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "claim_meta" => db_update
                     .claim_meta
@@ -656,6 +740,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "recipe_meta" => db_update
                     .recipe_meta
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "region" => db_update
+                    .region
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "resource_location" => db_update
                     .resource_location
@@ -676,6 +763,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "claim_info" => db_update
                     .claim_info
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "claim_member" => db_update
+                    .claim_member
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "claim_meta" => db_update
                     .claim_meta
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -709,6 +799,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "recipe_meta" => db_update
                     .recipe_meta
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "region" => db_update
+                    .region
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "resource_location" => db_update
                     .resource_location
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -728,6 +821,7 @@ impl __sdk::DbUpdate for DbUpdate {
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
     claim_info: __sdk::TableAppliedDiff<'r, ClaimInfo>,
+    claim_member: __sdk::TableAppliedDiff<'r, ClaimMember>,
     claim_meta: __sdk::TableAppliedDiff<'r, ClaimMeta>,
     claim_supply: __sdk::TableAppliedDiff<'r, ClaimSupply>,
     craft_contribution: __sdk::TableAppliedDiff<'r, CraftContribution>,
@@ -739,6 +833,7 @@ pub struct AppliedDiff<'r> {
     player_location: __sdk::TableAppliedDiff<'r, PlayerLocation>,
     player_state: __sdk::TableAppliedDiff<'r, PlayerState>,
     recipe_meta: __sdk::TableAppliedDiff<'r, RecipeMeta>,
+    region: __sdk::TableAppliedDiff<'r, Region>,
     resource_location: __sdk::TableAppliedDiff<'r, ResourceLocation>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
@@ -754,6 +849,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
         callbacks.invoke_table_row_callbacks::<ClaimInfo>("claim_info", &self.claim_info, event);
+        callbacks.invoke_table_row_callbacks::<ClaimMember>(
+            "claim_member",
+            &self.claim_member,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<ClaimMeta>("claim_meta", &self.claim_meta, event);
         callbacks.invoke_table_row_callbacks::<ClaimSupply>(
             "claim_supply",
@@ -797,6 +897,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<RecipeMeta>("recipe_meta", &self.recipe_meta, event);
+        callbacks.invoke_table_row_callbacks::<Region>("region", &self.region, event);
         callbacks.invoke_table_row_callbacks::<ResourceLocation>(
             "resource_location",
             &self.resource_location,
@@ -1463,6 +1564,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
         claim_info_table::register_table(client_cache);
+        claim_member_table::register_table(client_cache);
         claim_meta_table::register_table(client_cache);
         claim_supply_table::register_table(client_cache);
         craft_contribution_table::register_table(client_cache);
@@ -1474,10 +1576,12 @@ impl __sdk::SpacetimeModule for RemoteModule {
         player_location_table::register_table(client_cache);
         player_state_table::register_table(client_cache);
         recipe_meta_table::register_table(client_cache);
+        region_table::register_table(client_cache);
         resource_location_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "claim_info",
+        "claim_member",
         "claim_meta",
         "claim_supply",
         "craft_contribution",
@@ -1489,6 +1593,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "player_location",
         "player_state",
         "recipe_meta",
+        "region",
         "resource_location",
     ];
 }

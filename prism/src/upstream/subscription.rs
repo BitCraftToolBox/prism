@@ -41,12 +41,17 @@ pub enum Pipeline {
     /// `crafting_recipe_desc` (for stats) + `building_state` (for claim id).
     /// Feeds craft meta, progress, and contribution (and recipe meta).
     Crafts,
-    /// `claim_state` (existence/deletion) + `claim_local_state` (location,
-    /// supplies, upkeep) + `claim_tech_state` (research) +
+    /// `claim_state` (existence/deletion/ownership) + `claim_local_state`
+    /// (location, supplies, upkeep) + `claim_tech_state` (research) +
     /// `waystone_state` / `bank_state` / `marketplace_state` (auxiliary
-    /// buildings). Feeds the relay `claim_meta`, `claim_info`, and
-    /// `claim_supply` tables.
+    /// buildings) + `claim_member_state` (per-player membership + permission
+    /// flags). Feeds the relay `claim_meta`, `claim_info`, `claim_supply`, and
+    /// `claim_member` tables.
     Claims,
+    /// `world_region_name_state` + `world_region_state` +
+    /// `region_control_info`, collated into a single relay `region` row per
+    /// region.
+    Regions,
 }
 
 impl Pipeline {
@@ -98,6 +103,12 @@ impl Pipeline {
                 "SELECT * FROM waystone_state;".into(),
                 "SELECT * FROM bank_state;".into(),
                 "SELECT * FROM marketplace_state;".into(),
+                "SELECT * FROM claim_member_state;".into(),
+            ],
+            Pipeline::Regions => vec![
+                "SELECT * FROM world_region_name_state;".into(),
+                "SELECT * FROM world_region_state;".into(),
+                "SELECT * FROM region_control_info;".into(),
             ],
         }
     }
@@ -122,6 +133,9 @@ pub fn enabled_pipelines(cfg: &PipelinesConfig) -> Vec<Pipeline> {
     }
     if cfg.claims {
         out.push(Pipeline::Claims);
+    }
+    if cfg.regions {
+        out.push(Pipeline::Regions);
     }
     out
 }

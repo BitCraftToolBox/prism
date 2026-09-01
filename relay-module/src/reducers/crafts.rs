@@ -96,7 +96,9 @@ pub fn apply_craft_progress_deltas(
             .db
             .craft_contribution()
             .by_craft_and_player()
-            .filter((delta.craft_id, delta.player_id)).next() {
+            .filter((delta.craft_id, delta.player_id))
+            .next()
+        {
             ctx.db.craft_contribution().id().update(CraftContribution {
                 contribution: row.contribution + delta.progress_delta,
                 ..row
@@ -106,7 +108,7 @@ pub fn apply_craft_progress_deltas(
                 id: 0,
                 craft_id: delta.craft_id,
                 player_id: delta.player_id,
-                contribution: delta.progress_delta
+                contribution: delta.progress_delta,
             });
         }
 

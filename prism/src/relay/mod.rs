@@ -62,6 +62,11 @@ pub enum RelayMsg {
         info_rows: Vec<ClaimInfoRow>,
         supply_rows: Vec<ClaimSupplyRow>,
     },
+    /// Snapshot-phase payload: full replacement of `claim_member` for a region.
+    ReplaceClaimMembers {
+        region_id: u8,
+        rows: Vec<ClaimMemberRow>,
+    },
 
     InsertResource(ResourceRow),
     InsertGrowthTimer(GrowthTimerRow),
@@ -84,6 +89,17 @@ pub enum RelayMsg {
     UpsertClaimSupply(Vec<ClaimSupplyRow>),
     /// Live-phase delta: a claim was removed upstream; drop it from all tables.
     DeleteClaims(Vec<u64>),
+    /// Live-phase delta: upsert `claim_member` rows (new members, permission
+    /// changes).
+    UpsertClaimMembers(Vec<ClaimMemberRow>),
+    /// Live-phase delta: membership rows removed upstream (member left/kicked).
+    DeleteClaimMembers(Vec<u64>),
+    /// Live-phase delta: claims that changed hands; the relay module re-derives
+    /// the `owner` flag across each claim's membership rows.
+    SetClaimOwners(Vec<ClaimOwnerRow>),
+    /// Full `region` rows. Regions are few (~25 world-wide) and near-static, so
+    /// both the snapshot and live-phase changes send whole rows.
+    UpsertRegions(Vec<RegionRow>),
 
     DeleteResource(u64),
     DeleteEnemy(u64),
@@ -250,6 +266,47 @@ pub struct ClaimSupplyRow {
     pub num_tiles: u32,
     pub num_tile_neighbors: u32,
     pub building_maintenance: f32,
+}
+
+/// One `claim_member_state` row projected for the relay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimMemberRow {
+    /// The membership row's own entity id (not the player's, not the claim's).
+    pub entity_id: u64,
+    pub region_id: u8,
+    pub claim_entity_id: u64,
+    pub player_entity_id: u64,
+    pub build: bool,
+    pub inventory: bool,
+    pub officer: bool,
+    pub co_owner: bool,
+    /// Derived from `claim_state.owner_player_entity_id` rather than read off
+    /// the membership row: this player owns the claim.
+    pub owner: bool,
+}
+
+/// A claim's ownership as of the latest upstream `claim_state` row.
+#[derive(Debug, Clone)]
+pub struct ClaimOwnerRow {
+    pub claim_entity_id: u64,
+    /// `claim_state.owner_player_entity_id`; 0 when unknown/unowned.
+    pub owner_player_entity_id: u64,
+}
+
+/// Three upstream region tables (`world_region_name_state`,
+/// `world_region_state`, `region_control_info`) collated into one relay
+/// `region` row.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RegionRow {
+    pub id: u8,
+    pub name: String,
+    pub min_chunk_x: u16,
+    pub min_chunk_z: u16,
+    pub width_chunks: u16,
+    pub height_chunks: u16,
+    pub initialized: bool,
+    pub allow_players: bool,
+    pub allow_player_spawns: bool,
 }
 
 pub async fn run(

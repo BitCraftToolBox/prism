@@ -31,4 +31,5 @@ growth_resource_tags = ["World Event", "Hexite", "Wonder Resource"]
 enemies = true
 players = true
 claims = true
+regions = true
 crafts = false
