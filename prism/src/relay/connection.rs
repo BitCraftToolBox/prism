@@ -10,9 +10,9 @@ use anyhow::{Result, anyhow};
 use log::{info, warn};
 use relay_bindings::{
     ClaimInfo, ClaimInfoUpdate, ClaimMember, ClaimMeta, ClaimOwnerUpdate, ClaimSupply,
-    CraftContributionDelta, CraftPublicUpdate, CraftUpdate, DbConnection, EnemyLocation,
-    GrowthTimerUpdate, HerdLocation, MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate,
-    PlayerState, RecipeMeta, Region, ResourceLocation,
+    CraftContributionDelta, CraftExpiry, CraftPublicUpdate, CraftUpdate, DbConnection,
+    EnemyLocation, GrowthTimerUpdate, HerdLocation, MobileMoveUpdate, PlayerLocation,
+    PlayerRenameUpdate, PlayerState, RecipeMeta, Region, ResourceLocation,
     apply_craft_progress_deltas_reducer::apply_craft_progress_deltas,
     bulk_replace_claim_members_reducer::bulk_replace_claim_members,
     bulk_replace_claims_reducer::bulk_replace_claims,
@@ -289,10 +289,10 @@ impl RelayConnection {
             .map_err(|e| anyhow!("{e:?}"))
     }
 
-    pub fn schedule_craft_expiry(&self, craft_ids: Vec<u64>) -> Result<()> {
+    pub fn schedule_craft_expiry(&self, expiries: Vec<CraftExpiry>) -> Result<()> {
         self.conn
             .reducers
-            .schedule_craft_expiry(craft_ids)
+            .schedule_craft_expiry(expiries)
             .map_err(|e| anyhow!("{e:?}"))
     }
 

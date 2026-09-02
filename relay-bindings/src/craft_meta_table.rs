@@ -3,6 +3,7 @@
 
 #![allow(unused, clippy::all)]
 use super::craft_meta_type::CraftMeta;
+use super::craft_status_type::CraftStatus;
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 /// Table handle for the table `craft_meta`.

@@ -15,8 +15,9 @@ use super::join::{
 use crate::history::HistoryMsg;
 use crate::relay::{
     ClaimInfoField, ClaimInfoUpdate, ClaimMemberRow, ClaimOwnerRow, ClaimSupplyRow,
-    CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow,
-    HerdRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow,
+    CraftContributionDeltaRow, CraftExpiryRow, CraftExpiryStatus, CraftPublicUpdateRow,
+    CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, PlayerRow, PlayerStateRow, RecipeMetaRow,
+    RelayMsg, ResourceRow,
 };
 use crate::upstream::{GrowthTimerSubRequest, Phase, RegionUpdate};
 use anyhow::Result;
@@ -646,7 +647,7 @@ fn emit_deltas(
     let mut craft_upserts: Vec<CraftUpdateRow> = Vec::new();
     let mut craft_public_updates: Vec<CraftPublicUpdateRow> = Vec::new();
     let mut craft_progress_deltas: Vec<CraftContributionDeltaRow> = Vec::new();
-    let mut craft_expiry_ids: Vec<u64> = Vec::new();
+    let mut craft_expiries: Vec<CraftExpiryRow> = Vec::new();
     let mut claim_supply_upserts: Vec<ClaimSupplyRow> = Vec::new();
     let mut claim_info_updates: Vec<ClaimInfoUpdate> = Vec::new();
     let mut claim_deletes: Vec<u64> = Vec::new();
@@ -1033,6 +1034,11 @@ fn emit_deltas(
             });
         }
     }
+    // A delete with no matching insert means the craft is gone upstream. The
+    // relay keeps it for another 24h so clients don't see crafts vanish, so
+    // stamp *why* it went away — otherwise a collected craft keeps reading as
+    // "done, ready to collect" and a canceled one as "open for work".
+    let removal_status = craft_removal_status(reducer);
     for e in &update.progressive_action_state.deletes {
         if !update
             .progressive_action_state
@@ -1040,7 +1046,10 @@ fn emit_deltas(
             .iter()
             .any(|ins| ins.row.entity_id == e.row.entity_id)
         {
-            craft_expiry_ids.push(e.row.entity_id);
+            craft_expiries.push(CraftExpiryRow {
+                craft_id: e.row.entity_id,
+                status: removal_status,
+            });
         }
     }
 
@@ -1336,10 +1345,10 @@ fn emit_deltas(
             std::iter::once(RelayMsg::ApplyCraftProgressDeltas(craft_progress_deltas)),
         );
     }
-    if !craft_expiry_ids.is_empty() {
+    if !craft_expiries.is_empty() {
         send_relay(
             &sinks.relay_tx,
-            std::iter::once(RelayMsg::ScheduleCraftExpiry(craft_expiry_ids)),
+            std::iter::once(RelayMsg::ScheduleCraftExpiry(craft_expiries)),
         );
     }
     if !claim_supply_upserts.is_empty() {
@@ -1461,6 +1470,24 @@ fn send_history(
     }
     if dropped > 0 {
         debug!("history channel full — dropped {} messages", dropped);
+    }
+}
+
+/// Why a craft's upstream row disappeared. The collect reducers hand out the
+/// crafted items, so those are `Claimed`; anything else (cancellation, the
+/// building being destroyed, a server-side cleanup) is `Removed`.
+fn craft_removal_status(
+    reducer: &upstream_bindings::sdk::Event<upstream_bindings::region::Reducer>,
+) -> CraftExpiryStatus {
+    match reducer {
+        upstream_bindings::sdk::Event::Reducer(ev) => match ev.reducer {
+            upstream_bindings::region::Reducer::CraftCollect { .. }
+            | upstream_bindings::region::Reducer::CraftCollectAll { .. } => {
+                CraftExpiryStatus::Claimed
+            }
+            _ => CraftExpiryStatus::Removed,
+        },
+        _ => CraftExpiryStatus::Removed,
     }
 }
 

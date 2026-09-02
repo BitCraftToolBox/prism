@@ -4,6 +4,8 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+use super::craft_status_type::CraftStatus;
+
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub struct CraftMeta {
@@ -16,6 +18,7 @@ pub struct CraftMeta {
     pub count: i32,
     pub region_id: u8,
     pub public: bool,
+    pub status: CraftStatus,
 }
 
 impl __sdk::InModule for CraftMeta {
@@ -35,6 +38,7 @@ pub struct CraftMetaCols {
     pub count: __sdk::__query_builder::Col<CraftMeta, i32>,
     pub region_id: __sdk::__query_builder::Col<CraftMeta, u8>,
     pub public: __sdk::__query_builder::Col<CraftMeta, bool>,
+    pub status: __sdk::__query_builder::Col<CraftMeta, CraftStatus>,
 }
 
 impl __sdk::__query_builder::HasCols for CraftMeta {
@@ -50,6 +54,7 @@ impl __sdk::__query_builder::HasCols for CraftMeta {
             count: __sdk::__query_builder::Col::new(table_name, "count"),
             region_id: __sdk::__query_builder::Col::new(table_name, "region_id"),
             public: __sdk::__query_builder::Col::new(table_name, "public"),
+            status: __sdk::__query_builder::Col::new(table_name, "status"),
         }
     }
 }

@@ -1,4 +1,21 @@
-use spacetimedb::{Timestamp, table};
+use spacetimedb::{SpacetimeType, Timestamp, table};
+
+/// Lifecycle state of a craft, so consumers can tell a craft that is still
+/// open for contributions from one whose upstream row is already gone.
+///
+/// Rows linger for 24h after the upstream `progressive_action_state` row is
+/// deleted (see `schedule_craft_expiry`) so clients don't see crafts vanish
+/// mid-session; without a status they'd read a finished craft as "ready to
+/// collect" and a canceled one as "open for work" for that whole window.
+#[derive(SpacetimeType, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CraftStatus {
+    /// Upstream row still exists; progress is live.
+    Active,
+    /// Craft was collected (`craft_collect` / `craft_collect_all`).
+    Claimed,
+    /// Craft disappeared for any other reason (canceled, building removed).
+    Removed,
+}
 
 #[table(accessor = craft_meta, public,
     index(accessor = by_owner, btree(columns = [owner_entity_id])),
@@ -17,6 +34,8 @@ pub struct CraftMeta {
     pub count: i32,
     pub region_id: u8,
     pub public: bool,
+    #[default(CraftStatus::Active)]
+    pub status: CraftStatus,
 }
 
 #[table(accessor = craft_progress, public)]

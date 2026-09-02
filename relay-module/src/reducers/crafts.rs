@@ -1,7 +1,7 @@
 use crate::reducers::ensure_relay;
 use crate::tables::crafts::{
-    CraftContribution, CraftMeta, CraftProgress, RecipeMeta, craft_contribution, craft_meta,
-    craft_progress, recipe_meta,
+    CraftContribution, CraftMeta, CraftProgress, CraftStatus, RecipeMeta, craft_contribution,
+    craft_meta, craft_progress, recipe_meta,
 };
 use spacetimedb::{
     ReducerContext, ScheduleAt, SpacetimeType, Table, TimeDuration, Timestamp, reducer, table,
@@ -36,6 +36,14 @@ pub struct CraftContributionDelta {
     pub progress_delta: i32,
     pub progress_total: i32,
     pub last_seen: Timestamp,
+}
+
+/// A craft whose upstream row is gone: `status` records why, and the row is
+/// kept around for 24h before `remove_craft` drops it.
+#[derive(SpacetimeType)]
+pub struct CraftExpiry {
+    pub craft_id: u64,
+    pub status: CraftStatus,
 }
 
 #[derive(SpacetimeType)]
@@ -125,16 +133,25 @@ pub fn apply_craft_progress_deltas(
 }
 
 #[reducer]
-pub fn schedule_craft_expiry(ctx: &ReducerContext, craft_ids: Vec<u64>) -> Result<(), String> {
+pub fn schedule_craft_expiry(
+    ctx: &ReducerContext,
+    expiries: Vec<CraftExpiry>,
+) -> Result<(), String> {
     ensure_relay(ctx)?;
     let after_24h = TimeDuration::from_micros(24 * 60 * 60 * 1_000_000);
-    for craft_id in craft_ids {
+    for expiry in expiries {
+        if let Some(row) = ctx.db.craft_meta().entity_id().find(expiry.craft_id) {
+            ctx.db.craft_meta().entity_id().update(CraftMeta {
+                status: expiry.status,
+                ..row
+            });
+        }
         let scheduled_at: ScheduleAt = (ctx.timestamp + after_24h).into();
         ctx.db
             .expiring_crafts()
             .craft_id()
             .insert_or_update(ExpiringCraft {
-                craft_id,
+                craft_id: expiry.craft_id,
                 scheduled_at,
             });
     }
@@ -166,6 +183,9 @@ fn upsert_craft_rows(ctx: &ReducerContext, rows: Vec<CraftUpdate>) {
             count: row.count,
             region_id: row.region_id,
             public: row.public,
+            // Prism only upserts crafts whose upstream row exists, so an
+            // upsert always means the craft is live again.
+            status: CraftStatus::Active,
         });
         ctx.db
             .craft_progress()

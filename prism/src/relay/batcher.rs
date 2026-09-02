@@ -24,8 +24,8 @@ use metrics::{counter, histogram};
 use relay_bindings::{
     ClaimInfo, ClaimInfoField as BindingsClaimInfoField,
     ClaimInfoUpdate as BindingsClaimInfoUpdate, ClaimMember, ClaimMeta,
-    ClaimOwnerUpdate as BindingsClaimOwnerUpdate, ClaimSupply, CraftContributionDelta,
-    CraftPublicUpdate, CraftUpdate, EnemyLocation, GrowthTimerUpdate, HerdLocation,
+    ClaimOwnerUpdate as BindingsClaimOwnerUpdate, ClaimSupply, CraftContributionDelta, CraftExpiry,
+    CraftPublicUpdate, CraftStatus, CraftUpdate, EnemyLocation, GrowthTimerUpdate, HerdLocation,
     MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate, PlayerState, RecipeMeta,
     Region as BindingsRegion, ResourceLocation,
 };
@@ -36,9 +36,9 @@ use tokio::time::{Instant, interval_at};
 use super::connection::{RECONNECT_DELAY, RelayConnection};
 use super::{
     ClaimInfoField, ClaimInfoRow, ClaimInfoUpdate, ClaimMemberRow, ClaimMetaRow, ClaimOwnerRow,
-    ClaimSupplyRow, CraftContributionDeltaRow, CraftPublicUpdateRow, CraftUpdateRow, EnemyRow,
-    GrowthTimerRow, HerdRow, MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow,
-    RecipeMetaRow, RegionRow, RelayMsg, ResourceRow,
+    ClaimSupplyRow, CraftContributionDeltaRow, CraftExpiryRow, CraftExpiryStatus,
+    CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, MobileMoveRow,
+    PlayerRenameRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RegionRow, RelayMsg, ResourceRow,
 };
 use crate::config::{Config, RelayConfig};
 use crate::shutdown::SharedShutdown;
@@ -82,7 +82,7 @@ struct Batches {
     recipe_deletes: Vec<i32>,
     craft_public_updates: Vec<CraftPublicUpdate>,
     craft_progress_deltas: Vec<CraftContributionDelta>,
-    craft_expiry_ids: Vec<u64>,
+    craft_expiries: Vec<CraftExpiry>,
     claim_info_updates: Vec<BindingsClaimInfoUpdate>,
     claim_supply_upserts: Vec<ClaimSupply>,
     claim_deletes: Vec<u64>,
@@ -177,6 +177,15 @@ fn to_craft_update(r: &CraftUpdateRow) -> CraftUpdate {
         public: r.public,
         progress: r.progress,
         last_seen: Timestamp::from_micros_since_unix_epoch(r.last_seen_micros),
+    }
+}
+fn to_craft_expiry(r: &CraftExpiryRow) -> CraftExpiry {
+    CraftExpiry {
+        craft_id: r.craft_id,
+        status: match r.status {
+            CraftExpiryStatus::Claimed => CraftStatus::Claimed,
+            CraftExpiryStatus::Removed => CraftStatus::Removed,
+        },
     }
 }
 fn to_craft_public_update(r: &CraftPublicUpdateRow) -> CraftPublicUpdate {
@@ -572,9 +581,9 @@ pub async fn run(
                         batches.craft_progress_deltas.extend(rows.iter().map(to_craft_progress_delta));
                         if batches.craft_progress_deltas.len() >= MAX_BATCH { flush_craft_batch(&conn, &mut batches); }
                     }
-                    RelayMsg::ScheduleCraftExpiry(craft_ids) => {
-                        batches.craft_expiry_ids.extend(craft_ids);
-                        if batches.craft_expiry_ids.len() >= MAX_BATCH { flush_craft_batch(&conn, &mut batches); }
+                    RelayMsg::ScheduleCraftExpiry(rows) => {
+                        batches.craft_expiries.extend(rows.iter().map(to_craft_expiry));
+                        if batches.craft_expiries.len() >= MAX_BATCH { flush_craft_batch(&conn, &mut batches); }
                     }
                     RelayMsg::UpdateClaimInfo(rows) => {
                         batches.claim_info_updates.extend(rows.iter().map(to_claim_info_update));
@@ -668,7 +677,7 @@ pub async fn run(
                         + batches.recipe_deletes.len()
                         + batches.craft_public_updates.len()
                         + batches.craft_progress_deltas.len()
-                        + batches.craft_expiry_ids.len()) as f64);
+                        + batches.craft_expiries.len()) as f64);
                 let t = std::time::Instant::now();
                 flush_craft_batch(&conn, &mut batches);
                 histogram!("prism_relay_flush_duration_seconds", "pipeline" => "craft")
@@ -958,15 +967,15 @@ fn flush_craft_batch(conn: &RelayConnection, batches: &mut Batches) {
             warn!("relay: apply_craft_progress_deltas: {e:?}");
         }
     }
-    if !batches.craft_expiry_ids.is_empty() {
-        let craft_ids = std::mem::take(&mut batches.craft_expiry_ids);
+    if !batches.craft_expiries.is_empty() {
+        let expiries = std::mem::take(&mut batches.craft_expiries);
         debug!(
             "relay flush: schedule_craft_expiry count={}",
-            craft_ids.len()
+            expiries.len()
         );
         counter!("prism_relay_flush_rows_total", "pipeline" => "craft", "op" => "expiry")
-            .increment(craft_ids.len() as u64);
-        if let Err(e) = conn.schedule_craft_expiry(craft_ids) {
+            .increment(expiries.len() as u64);
+        if let Err(e) = conn.schedule_craft_expiry(expiries) {
             warn!("relay: schedule_craft_expiry: {e:?}");
         }
     }

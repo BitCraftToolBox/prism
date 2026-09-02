@@ -4,50 +4,48 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
-use super::craft_expiry_type::CraftExpiry;
-
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub(super) struct ScheduleCraftExpiryArgs {
-    pub expiries: Vec<CraftExpiry>,
+pub(super) struct DeleteRegionsArgs {
+    pub regions: Option<Vec<u8>>,
 }
 
-impl From<ScheduleCraftExpiryArgs> for super::Reducer {
-    fn from(args: ScheduleCraftExpiryArgs) -> Self {
-        Self::ScheduleCraftExpiry {
-            expiries: args.expiries,
+impl From<DeleteRegionsArgs> for super::Reducer {
+    fn from(args: DeleteRegionsArgs) -> Self {
+        Self::DeleteRegions {
+            regions: args.regions,
         }
     }
 }
 
-impl __sdk::InModule for ScheduleCraftExpiryArgs {
+impl __sdk::InModule for DeleteRegionsArgs {
     type Module = super::RemoteModule;
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `schedule_craft_expiry`.
+/// Extension trait for access to the reducer `delete_regions`.
 ///
 /// Implemented for [`super::RemoteReducers`].
-pub trait schedule_craft_expiry {
-    /// Request that the remote module invoke the reducer `schedule_craft_expiry` to run as soon as possible.
+pub trait delete_regions {
+    /// Request that the remote module invoke the reducer `delete_regions` to run as soon as possible.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`schedule_craft_expiry:schedule_craft_expiry_then`] to run a callback after the reducer completes.
-    fn schedule_craft_expiry(&self, expiries: Vec<CraftExpiry>) -> __sdk::Result<()> {
-        self.schedule_craft_expiry_then(expiries, |_, _| {})
+    /// /// Use [`delete_regions:delete_regions_then`] to run a callback after the reducer completes.
+    fn delete_regions(&self, regions: Option<Vec<u8>>) -> __sdk::Result<()> {
+        self.delete_regions_then(regions, |_, _| {})
     }
 
-    /// Request that the remote module invoke the reducer `schedule_craft_expiry` to run as soon as possible,
+    /// Request that the remote module invoke the reducer `delete_regions` to run as soon as possible,
     /// registering `callback` to run when we are notified that the reducer completed.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and its status can be observed with the `callback`.
-    fn schedule_craft_expiry_then(
+    fn delete_regions_then(
         &self,
-        expiries: Vec<CraftExpiry>,
+        regions: Option<Vec<u8>>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -55,16 +53,16 @@ pub trait schedule_craft_expiry {
     ) -> __sdk::Result<()>;
 }
 
-impl schedule_craft_expiry for super::RemoteReducers {
-    fn schedule_craft_expiry_then(
+impl delete_regions for super::RemoteReducers {
+    fn delete_regions_then(
         &self,
-        expiries: Vec<CraftExpiry>,
+        regions: Option<Vec<u8>>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp
-            .invoke_reducer_with_callback(ScheduleCraftExpiryArgs { expiries }, callback)
+            .invoke_reducer_with_callback(DeleteRegionsArgs { regions }, callback)
     }
 }

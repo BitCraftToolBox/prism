@@ -81,7 +81,7 @@ pub enum RelayMsg {
     DeleteRecipeMeta(Vec<i32>),
     ToggleCraftPublic(Vec<CraftPublicUpdateRow>),
     ApplyCraftProgressDeltas(Vec<CraftContributionDeltaRow>),
-    ScheduleCraftExpiry(Vec<u64>),
+    ScheduleCraftExpiry(Vec<CraftExpiryRow>),
     /// Live-phase delta: targeted field updates to existing ClaimInfo rows
     /// (name/bank/marketplace/waystone/research), sent one field at a time.
     UpdateClaimInfo(Vec<ClaimInfoUpdate>),
@@ -203,6 +203,24 @@ pub struct CraftUpdateRow {
     pub public: bool,
     pub progress: i32,
     pub last_seen_micros: i64,
+}
+
+/// Why a craft's upstream row went away. Maps onto the `Claimed`/`Removed`
+/// arms of `relay_bindings::CraftStatus` — prism never expires a craft as
+/// `Active`, that state is stamped by the relay module on upsert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CraftExpiryStatus {
+    Claimed,
+    Removed,
+}
+
+/// A craft whose upstream `progressive_action_state` row was deleted. The relay
+/// module stamps `status` onto the craft and drops the row 24h later, so
+/// consumers can tell a collected craft from a canceled one in the meantime.
+#[derive(Debug, Clone)]
+pub struct CraftExpiryRow {
+    pub craft_id: u64,
+    pub status: CraftExpiryStatus,
 }
 
 #[derive(Debug, Clone)]

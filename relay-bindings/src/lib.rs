@@ -28,11 +28,13 @@ pub mod claim_supply_type;
 pub mod craft_contribution_delta_type;
 pub mod craft_contribution_table;
 pub mod craft_contribution_type;
+pub mod craft_expiry_type;
 pub mod craft_meta_table;
 pub mod craft_meta_type;
 pub mod craft_progress_table;
 pub mod craft_progress_type;
 pub mod craft_public_update_type;
+pub mod craft_status_type;
 pub mod craft_update_type;
 pub mod delete_claim_members_reducer;
 pub mod delete_claims_reducer;
@@ -41,6 +43,7 @@ pub mod delete_herds_reducer;
 pub mod delete_player_states_reducer;
 pub mod delete_players_reducer;
 pub mod delete_recipe_meta_reducer;
+pub mod delete_regions_reducer;
 pub mod delete_resources_reducer;
 pub mod enemy_location_table;
 pub mod enemy_location_type;
@@ -106,11 +109,13 @@ pub use claim_supply_type::ClaimSupply;
 pub use craft_contribution_delta_type::CraftContributionDelta;
 pub use craft_contribution_table::*;
 pub use craft_contribution_type::CraftContribution;
+pub use craft_expiry_type::CraftExpiry;
 pub use craft_meta_table::*;
 pub use craft_meta_type::CraftMeta;
 pub use craft_progress_table::*;
 pub use craft_progress_type::CraftProgress;
 pub use craft_public_update_type::CraftPublicUpdate;
+pub use craft_status_type::CraftStatus;
 pub use craft_update_type::CraftUpdate;
 pub use delete_claim_members_reducer::delete_claim_members;
 pub use delete_claims_reducer::delete_claims;
@@ -119,6 +124,7 @@ pub use delete_herds_reducer::delete_herds;
 pub use delete_player_states_reducer::delete_player_states;
 pub use delete_players_reducer::delete_players;
 pub use delete_recipe_meta_reducer::delete_recipe_meta;
+pub use delete_regions_reducer::delete_regions;
 pub use delete_resources_reducer::delete_resources;
 pub use enemy_location_table::*;
 pub use enemy_location_type::EnemyLocation;
@@ -229,6 +235,9 @@ pub enum Reducer {
     DeleteRecipeMeta {
         recipe_ids: Vec<i32>,
     },
+    DeleteRegions {
+        regions: Option<Vec<u8>>,
+    },
     DeleteResources {
         entity_ids: Vec<u64>,
     },
@@ -249,7 +258,7 @@ pub enum Reducer {
         renames: Vec<PlayerRenameUpdate>,
     },
     ScheduleCraftExpiry {
-        craft_ids: Vec<u64>,
+        expiries: Vec<CraftExpiry>,
     },
     SetClaimOwners {
         updates: Vec<ClaimOwnerUpdate>,
@@ -314,6 +323,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeletePlayerStates { .. } => "delete_player_states",
             Reducer::DeletePlayers { .. } => "delete_players",
             Reducer::DeleteRecipeMeta { .. } => "delete_recipe_meta",
+            Reducer::DeleteRegions { .. } => "delete_regions",
             Reducer::DeleteResources { .. } => "delete_resources",
             Reducer::InitRelay => "init_relay",
             Reducer::InsertEnemies { .. } => "insert_enemies",
@@ -445,6 +455,11 @@ impl __sdk::Reducer for Reducer {
                     recipe_ids: recipe_ids.clone(),
                 })
             }
+            Reducer::DeleteRegions { regions } => {
+                __sats::bsatn::to_vec(&delete_regions_reducer::DeleteRegionsArgs {
+                    regions: regions.clone(),
+                })
+            }
             Reducer::DeleteResources { entity_ids } => {
                 __sats::bsatn::to_vec(&delete_resources_reducer::DeleteResourcesArgs {
                     entity_ids: entity_ids.clone(),
@@ -476,9 +491,9 @@ impl __sdk::Reducer for Reducer {
                     renames: renames.clone(),
                 })
             }
-            Reducer::ScheduleCraftExpiry { craft_ids } => {
+            Reducer::ScheduleCraftExpiry { expiries } => {
                 __sats::bsatn::to_vec(&schedule_craft_expiry_reducer::ScheduleCraftExpiryArgs {
-                    craft_ids: craft_ids.clone(),
+                    expiries: expiries.clone(),
                 })
             }
             Reducer::SetClaimOwners { updates } => {
