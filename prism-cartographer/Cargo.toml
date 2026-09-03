@@ -12,7 +12,7 @@ path = "src/main.rs"
 # Downstream: generated client bindings for the relay module (standard SDK 2.x).
 relay_bindings = { path = "../relay-bindings" }
 # Standard SDK 2.x re-exported for trait imports (DbContext, Table, SubscriptionHandle).
-relay_sdk = { package = "spacetimedb-sdk", version = "2.4.0" }
+relay_sdk = { package = "spacetimedb-sdk", version = "2.9.0" }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "process"] }
 anyhow = "1"
