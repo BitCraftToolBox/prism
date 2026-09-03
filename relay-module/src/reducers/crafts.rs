@@ -231,12 +231,16 @@ fn upsert_craft_rows(ctx: &ReducerContext, rows: Vec<CraftUpdate>) {
             // upsert always means the craft is live again.
             status: CraftStatus::Active,
         });
+        let last_active = match ctx.db.craft_progress().entity_id().find(row.entity_id) {
+            Some(existing) => existing.last_seen,
+            None => row.last_seen,
+        };
         ctx.db
             .craft_progress()
             .entity_id()
             .insert_or_update(CraftProgress {
                 entity_id: row.entity_id,
-                last_seen: row.last_seen,
+                last_seen: last_active,
                 progress: row.progress,
             });
     }
