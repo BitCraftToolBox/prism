@@ -27,8 +27,8 @@ use relay_bindings::{
     delete_recipe_meta_reducer::delete_recipe_meta, delete_resources_reducer::delete_resources,
     init_relay_reducer::init_relay, insert_enemies_reducer::insert_enemies,
     insert_growth_timers_reducer::insert_growth_timers, insert_resources_reducer::insert_resources,
-    move_mobile_entities_reducer::move_mobile_entities, rename_players_reducer::rename_players,
-    schedule_craft_expiry_reducer::schedule_craft_expiry,
+    move_mobile_entities_reducer::move_mobile_entities, reconcile_crafts_reducer::reconcile_crafts,
+    rename_players_reducer::rename_players, schedule_craft_expiry_reducer::schedule_craft_expiry,
     set_claim_owners_reducer::set_claim_owners, set_players_offline_reducer::set_players_offline,
     set_players_online_reducer::set_players_online, toggle_public_reducer::toggle_public,
     update_claim_info_reducer::update_claim_info,
@@ -293,6 +293,13 @@ impl RelayConnection {
         self.conn
             .reducers
             .schedule_craft_expiry(expiries)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn reconcile_crafts(&self, region_id: u8, craft_ids: Vec<u64>) -> Result<()> {
+        self.conn
+            .reducers
+            .reconcile_crafts(region_id, craft_ids)
             .map_err(|e| anyhow!("{e:?}"))
     }
 

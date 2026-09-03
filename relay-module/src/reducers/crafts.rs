@@ -138,6 +138,51 @@ pub fn schedule_craft_expiry(
     expiries: Vec<CraftExpiry>,
 ) -> Result<(), String> {
     ensure_relay(ctx)?;
+    apply_craft_expiries(ctx, expiries);
+    Ok(())
+}
+
+/// Prism's delete stream for `progressive_action_state` can miss rows (region
+/// disconnect, upstream maintenance, SpacetimeDB bugs), which would otherwise
+/// leave a craft `Active` in the relay forever since normal table sync only
+/// upserts crafts that still exist upstream. Prism periodically sends the
+/// full set of craft ids it currently sees for a region here; anything this
+/// relay still has as `Active` for that region but that's missing from the
+/// set gets expired, same as a normal removal.
+#[reducer]
+pub fn reconcile_crafts(
+    ctx: &ReducerContext,
+    region_id: u8,
+    craft_ids: Vec<u64>,
+) -> Result<(), String> {
+    ensure_relay(ctx)?;
+    let keep: std::collections::HashSet<u64> = craft_ids.into_iter().collect();
+    let stale: Vec<CraftExpiry> = ctx
+        .db
+        .craft_meta()
+        .by_region()
+        .filter(region_id)
+        .filter(|row| row.status == CraftStatus::Active && !keep.contains(&row.entity_id))
+        .map(|row| CraftExpiry {
+            craft_id: row.entity_id,
+            status: CraftStatus::Removed,
+        })
+        .collect();
+
+    if stale.is_empty() {
+        return Ok(());
+    }
+
+    spacetimedb::log::info!(
+        "relay: reconcile_crafts region {}: expiring {} craft(s) missing from upstream snapshot",
+        region_id,
+        stale.len()
+    );
+    apply_craft_expiries(ctx, stale);
+    Ok(())
+}
+
+fn apply_craft_expiries(ctx: &ReducerContext, expiries: Vec<CraftExpiry>) {
     let after_24h = TimeDuration::from_micros(24 * 60 * 60 * 1_000_000);
     for expiry in expiries {
         if let Some(row) = ctx.db.craft_meta().entity_id().find(expiry.craft_id) {
@@ -155,7 +200,6 @@ pub fn schedule_craft_expiry(
                 scheduled_at,
             });
     }
-    Ok(())
 }
 
 #[reducer]

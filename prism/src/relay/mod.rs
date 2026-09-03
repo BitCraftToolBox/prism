@@ -55,6 +55,14 @@ pub enum RelayMsg {
         recipe_rows: Vec<RecipeMetaRow>,
         rows: Vec<CraftUpdateRow>,
     },
+    /// Snapshot-phase reconciliation: the full set of craft ids prism currently
+    /// sees upstream for a region. Expires any craft the relay still has as
+    /// `Active` for this region but that's missing from the set — covers
+    /// deletes prism missed (disconnect, upstream maintenance, SpacetimeDB bugs).
+    ReconcileCrafts {
+        region_id: u8,
+        craft_ids: Vec<u64>,
+    },
     /// Snapshot-phase payload: full replacement of all claim tables for a region.
     ReplaceClaims {
         region_id: u8,

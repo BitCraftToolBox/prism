@@ -21,6 +21,7 @@ pub enum CraftStatus {
     index(accessor = by_owner, btree(columns = [owner_entity_id])),
     index(accessor = by_claim, btree(columns = [claim_entity_id])),
     index(accessor = by_owner_and_claim, btree(columns = [owner_entity_id, claim_entity_id])),
+    index(accessor = by_region, btree(columns = [region_id])),
 )]
 pub struct CraftMeta {
     #[primary_key]

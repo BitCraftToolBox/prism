@@ -18,6 +18,18 @@ pub struct CraftContributionTableHandle<'ctx> {
     ctx: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
+/// Lifetime-aware accessor marker for the table `craft_contribution`.
+pub struct CraftContributionTableAccessor;
+
+impl __sdk::TableAccessor<super::RemoteTables> for CraftContributionTableAccessor {
+    type Row = CraftContribution;
+    type Handle<'db> = CraftContributionTableHandle<'db>;
+
+    fn get<'db>(db: &'db super::RemoteTables) -> Self::Handle<'db> {
+        db.craft_contribution()
+    }
+}
+
 #[allow(non_camel_case_types)]
 /// Extension trait for access to the table `craft_contribution`.
 ///
@@ -41,6 +53,18 @@ impl CraftContributionTableAccess for super::RemoteTables {
 
 pub struct CraftContributionInsertCallbackId(__sdk::CallbackId);
 pub struct CraftContributionDeleteCallbackId(__sdk::CallbackId);
+
+impl<'ctx> __sdk::TableLike for CraftContributionTableHandle<'ctx> {
+    type Row = CraftContribution;
+    type EventContext = super::EventContext;
+
+    fn count(&self) -> u64 {
+        self.imp.count()
+    }
+    fn iter(&self) -> impl Iterator<Item = CraftContribution> + '_ {
+        self.imp.iter()
+    }
+}
 
 impl<'ctx> __sdk::Table for CraftContributionTableHandle<'ctx> {
     type Row = CraftContribution;
@@ -80,9 +104,54 @@ impl<'ctx> __sdk::Table for CraftContributionTableHandle<'ctx> {
     }
 }
 
+impl<'ctx> __sdk::WithInsert for CraftContributionTableHandle<'ctx> {
+    type InsertCallbackId = CraftContributionInsertCallbackId;
+
+    fn on_insert(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> CraftContributionInsertCallbackId {
+        CraftContributionInsertCallbackId(self.imp.on_insert(Box::new(callback)))
+    }
+
+    fn remove_on_insert(&self, callback: CraftContributionInsertCallbackId) {
+        self.imp.remove_on_insert(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithDelete for CraftContributionTableHandle<'ctx> {
+    type DeleteCallbackId = CraftContributionDeleteCallbackId;
+
+    fn on_delete(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> CraftContributionDeleteCallbackId {
+        CraftContributionDeleteCallbackId(self.imp.on_delete(Box::new(callback)))
+    }
+
+    fn remove_on_delete(&self, callback: CraftContributionDeleteCallbackId) {
+        self.imp.remove_on_delete(callback.0)
+    }
+}
+
 pub struct CraftContributionUpdateCallbackId(__sdk::CallbackId);
 
 impl<'ctx> __sdk::TableWithPrimaryKey for CraftContributionTableHandle<'ctx> {
+    type UpdateCallbackId = CraftContributionUpdateCallbackId;
+
+    fn on_update(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row, &Self::Row) + Send + 'static,
+    ) -> CraftContributionUpdateCallbackId {
+        CraftContributionUpdateCallbackId(self.imp.on_update(Box::new(callback)))
+    }
+
+    fn remove_on_update(&self, callback: CraftContributionUpdateCallbackId) {
+        self.imp.remove_on_update(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithUpdate for CraftContributionTableHandle<'ctx> {
     type UpdateCallbackId = CraftContributionUpdateCallbackId;
 
     fn on_update(

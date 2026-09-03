@@ -18,6 +18,18 @@ pub struct RegionTableHandle<'ctx> {
     ctx: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
+/// Lifetime-aware accessor marker for the table `region`.
+pub struct RegionTableAccessor;
+
+impl __sdk::TableAccessor<super::RemoteTables> for RegionTableAccessor {
+    type Row = Region;
+    type Handle<'db> = RegionTableHandle<'db>;
+
+    fn get<'db>(db: &'db super::RemoteTables) -> Self::Handle<'db> {
+        db.region()
+    }
+}
+
 #[allow(non_camel_case_types)]
 /// Extension trait for access to the table `region`.
 ///
@@ -39,6 +51,18 @@ impl RegionTableAccess for super::RemoteTables {
 
 pub struct RegionInsertCallbackId(__sdk::CallbackId);
 pub struct RegionDeleteCallbackId(__sdk::CallbackId);
+
+impl<'ctx> __sdk::TableLike for RegionTableHandle<'ctx> {
+    type Row = Region;
+    type EventContext = super::EventContext;
+
+    fn count(&self) -> u64 {
+        self.imp.count()
+    }
+    fn iter(&self) -> impl Iterator<Item = Region> + '_ {
+        self.imp.iter()
+    }
+}
 
 impl<'ctx> __sdk::Table for RegionTableHandle<'ctx> {
     type Row = Region;
@@ -78,9 +102,54 @@ impl<'ctx> __sdk::Table for RegionTableHandle<'ctx> {
     }
 }
 
+impl<'ctx> __sdk::WithInsert for RegionTableHandle<'ctx> {
+    type InsertCallbackId = RegionInsertCallbackId;
+
+    fn on_insert(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> RegionInsertCallbackId {
+        RegionInsertCallbackId(self.imp.on_insert(Box::new(callback)))
+    }
+
+    fn remove_on_insert(&self, callback: RegionInsertCallbackId) {
+        self.imp.remove_on_insert(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithDelete for RegionTableHandle<'ctx> {
+    type DeleteCallbackId = RegionDeleteCallbackId;
+
+    fn on_delete(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> RegionDeleteCallbackId {
+        RegionDeleteCallbackId(self.imp.on_delete(Box::new(callback)))
+    }
+
+    fn remove_on_delete(&self, callback: RegionDeleteCallbackId) {
+        self.imp.remove_on_delete(callback.0)
+    }
+}
+
 pub struct RegionUpdateCallbackId(__sdk::CallbackId);
 
 impl<'ctx> __sdk::TableWithPrimaryKey for RegionTableHandle<'ctx> {
+    type UpdateCallbackId = RegionUpdateCallbackId;
+
+    fn on_update(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row, &Self::Row) + Send + 'static,
+    ) -> RegionUpdateCallbackId {
+        RegionUpdateCallbackId(self.imp.on_update(Box::new(callback)))
+    }
+
+    fn remove_on_update(&self, callback: RegionUpdateCallbackId) {
+        self.imp.remove_on_update(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithUpdate for RegionTableHandle<'ctx> {
     type UpdateCallbackId = RegionUpdateCallbackId;
 
     fn on_update(

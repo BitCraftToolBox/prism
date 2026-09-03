@@ -18,6 +18,18 @@ pub struct GrowthTimersTableHandle<'ctx> {
     ctx: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
+/// Lifetime-aware accessor marker for the table `growth_timers`.
+pub struct GrowthTimersTableAccessor;
+
+impl __sdk::TableAccessor<super::RemoteTables> for GrowthTimersTableAccessor {
+    type Row = GrowthTimer;
+    type Handle<'db> = GrowthTimersTableHandle<'db>;
+
+    fn get<'db>(db: &'db super::RemoteTables) -> Self::Handle<'db> {
+        db.growth_timers()
+    }
+}
+
 #[allow(non_camel_case_types)]
 /// Extension trait for access to the table `growth_timers`.
 ///
@@ -39,6 +51,18 @@ impl GrowthTimersTableAccess for super::RemoteTables {
 
 pub struct GrowthTimersInsertCallbackId(__sdk::CallbackId);
 pub struct GrowthTimersDeleteCallbackId(__sdk::CallbackId);
+
+impl<'ctx> __sdk::TableLike for GrowthTimersTableHandle<'ctx> {
+    type Row = GrowthTimer;
+    type EventContext = super::EventContext;
+
+    fn count(&self) -> u64 {
+        self.imp.count()
+    }
+    fn iter(&self) -> impl Iterator<Item = GrowthTimer> + '_ {
+        self.imp.iter()
+    }
+}
 
 impl<'ctx> __sdk::Table for GrowthTimersTableHandle<'ctx> {
     type Row = GrowthTimer;
@@ -78,9 +102,54 @@ impl<'ctx> __sdk::Table for GrowthTimersTableHandle<'ctx> {
     }
 }
 
+impl<'ctx> __sdk::WithInsert for GrowthTimersTableHandle<'ctx> {
+    type InsertCallbackId = GrowthTimersInsertCallbackId;
+
+    fn on_insert(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> GrowthTimersInsertCallbackId {
+        GrowthTimersInsertCallbackId(self.imp.on_insert(Box::new(callback)))
+    }
+
+    fn remove_on_insert(&self, callback: GrowthTimersInsertCallbackId) {
+        self.imp.remove_on_insert(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithDelete for GrowthTimersTableHandle<'ctx> {
+    type DeleteCallbackId = GrowthTimersDeleteCallbackId;
+
+    fn on_delete(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> GrowthTimersDeleteCallbackId {
+        GrowthTimersDeleteCallbackId(self.imp.on_delete(Box::new(callback)))
+    }
+
+    fn remove_on_delete(&self, callback: GrowthTimersDeleteCallbackId) {
+        self.imp.remove_on_delete(callback.0)
+    }
+}
+
 pub struct GrowthTimersUpdateCallbackId(__sdk::CallbackId);
 
 impl<'ctx> __sdk::TableWithPrimaryKey for GrowthTimersTableHandle<'ctx> {
+    type UpdateCallbackId = GrowthTimersUpdateCallbackId;
+
+    fn on_update(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row, &Self::Row) + Send + 'static,
+    ) -> GrowthTimersUpdateCallbackId {
+        GrowthTimersUpdateCallbackId(self.imp.on_update(Box::new(callback)))
+    }
+
+    fn remove_on_update(&self, callback: GrowthTimersUpdateCallbackId) {
+        self.imp.remove_on_update(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithUpdate for GrowthTimersTableHandle<'ctx> {
     type UpdateCallbackId = GrowthTimersUpdateCallbackId;
 
     fn on_update(

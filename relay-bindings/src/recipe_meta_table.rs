@@ -18,6 +18,18 @@ pub struct RecipeMetaTableHandle<'ctx> {
     ctx: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
+/// Lifetime-aware accessor marker for the table `recipe_meta`.
+pub struct RecipeMetaTableAccessor;
+
+impl __sdk::TableAccessor<super::RemoteTables> for RecipeMetaTableAccessor {
+    type Row = RecipeMeta;
+    type Handle<'db> = RecipeMetaTableHandle<'db>;
+
+    fn get<'db>(db: &'db super::RemoteTables) -> Self::Handle<'db> {
+        db.recipe_meta()
+    }
+}
+
 #[allow(non_camel_case_types)]
 /// Extension trait for access to the table `recipe_meta`.
 ///
@@ -39,6 +51,18 @@ impl RecipeMetaTableAccess for super::RemoteTables {
 
 pub struct RecipeMetaInsertCallbackId(__sdk::CallbackId);
 pub struct RecipeMetaDeleteCallbackId(__sdk::CallbackId);
+
+impl<'ctx> __sdk::TableLike for RecipeMetaTableHandle<'ctx> {
+    type Row = RecipeMeta;
+    type EventContext = super::EventContext;
+
+    fn count(&self) -> u64 {
+        self.imp.count()
+    }
+    fn iter(&self) -> impl Iterator<Item = RecipeMeta> + '_ {
+        self.imp.iter()
+    }
+}
 
 impl<'ctx> __sdk::Table for RecipeMetaTableHandle<'ctx> {
     type Row = RecipeMeta;
@@ -78,9 +102,54 @@ impl<'ctx> __sdk::Table for RecipeMetaTableHandle<'ctx> {
     }
 }
 
+impl<'ctx> __sdk::WithInsert for RecipeMetaTableHandle<'ctx> {
+    type InsertCallbackId = RecipeMetaInsertCallbackId;
+
+    fn on_insert(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> RecipeMetaInsertCallbackId {
+        RecipeMetaInsertCallbackId(self.imp.on_insert(Box::new(callback)))
+    }
+
+    fn remove_on_insert(&self, callback: RecipeMetaInsertCallbackId) {
+        self.imp.remove_on_insert(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithDelete for RecipeMetaTableHandle<'ctx> {
+    type DeleteCallbackId = RecipeMetaDeleteCallbackId;
+
+    fn on_delete(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> RecipeMetaDeleteCallbackId {
+        RecipeMetaDeleteCallbackId(self.imp.on_delete(Box::new(callback)))
+    }
+
+    fn remove_on_delete(&self, callback: RecipeMetaDeleteCallbackId) {
+        self.imp.remove_on_delete(callback.0)
+    }
+}
+
 pub struct RecipeMetaUpdateCallbackId(__sdk::CallbackId);
 
 impl<'ctx> __sdk::TableWithPrimaryKey for RecipeMetaTableHandle<'ctx> {
+    type UpdateCallbackId = RecipeMetaUpdateCallbackId;
+
+    fn on_update(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row, &Self::Row) + Send + 'static,
+    ) -> RecipeMetaUpdateCallbackId {
+        RecipeMetaUpdateCallbackId(self.imp.on_update(Box::new(callback)))
+    }
+
+    fn remove_on_update(&self, callback: RecipeMetaUpdateCallbackId) {
+        self.imp.remove_on_update(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithUpdate for RecipeMetaTableHandle<'ctx> {
     type UpdateCallbackId = RecipeMetaUpdateCallbackId;
 
     fn on_update(

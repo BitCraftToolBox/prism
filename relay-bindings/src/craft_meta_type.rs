@@ -66,6 +66,7 @@ pub struct CraftMetaIxCols {
     pub claim_entity_id: __sdk::__query_builder::IxCol<CraftMeta, u64>,
     pub entity_id: __sdk::__query_builder::IxCol<CraftMeta, u64>,
     pub owner_entity_id: __sdk::__query_builder::IxCol<CraftMeta, u64>,
+    pub region_id: __sdk::__query_builder::IxCol<CraftMeta, u8>,
 }
 
 impl __sdk::__query_builder::HasIxCols for CraftMeta {
@@ -75,6 +76,7 @@ impl __sdk::__query_builder::HasIxCols for CraftMeta {
             claim_entity_id: __sdk::__query_builder::IxCol::new(table_name, "claim_entity_id"),
             entity_id: __sdk::__query_builder::IxCol::new(table_name, "entity_id"),
             owner_entity_id: __sdk::__query_builder::IxCol::new(table_name, "owner_entity_id"),
+            region_id: __sdk::__query_builder::IxCol::new(table_name, "region_id"),
         }
     }
 }

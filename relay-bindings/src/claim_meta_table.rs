@@ -18,6 +18,18 @@ pub struct ClaimMetaTableHandle<'ctx> {
     ctx: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
+/// Lifetime-aware accessor marker for the table `claim_meta`.
+pub struct ClaimMetaTableAccessor;
+
+impl __sdk::TableAccessor<super::RemoteTables> for ClaimMetaTableAccessor {
+    type Row = ClaimMeta;
+    type Handle<'db> = ClaimMetaTableHandle<'db>;
+
+    fn get<'db>(db: &'db super::RemoteTables) -> Self::Handle<'db> {
+        db.claim_meta()
+    }
+}
+
 #[allow(non_camel_case_types)]
 /// Extension trait for access to the table `claim_meta`.
 ///
@@ -39,6 +51,18 @@ impl ClaimMetaTableAccess for super::RemoteTables {
 
 pub struct ClaimMetaInsertCallbackId(__sdk::CallbackId);
 pub struct ClaimMetaDeleteCallbackId(__sdk::CallbackId);
+
+impl<'ctx> __sdk::TableLike for ClaimMetaTableHandle<'ctx> {
+    type Row = ClaimMeta;
+    type EventContext = super::EventContext;
+
+    fn count(&self) -> u64 {
+        self.imp.count()
+    }
+    fn iter(&self) -> impl Iterator<Item = ClaimMeta> + '_ {
+        self.imp.iter()
+    }
+}
 
 impl<'ctx> __sdk::Table for ClaimMetaTableHandle<'ctx> {
     type Row = ClaimMeta;
@@ -78,9 +102,54 @@ impl<'ctx> __sdk::Table for ClaimMetaTableHandle<'ctx> {
     }
 }
 
+impl<'ctx> __sdk::WithInsert for ClaimMetaTableHandle<'ctx> {
+    type InsertCallbackId = ClaimMetaInsertCallbackId;
+
+    fn on_insert(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> ClaimMetaInsertCallbackId {
+        ClaimMetaInsertCallbackId(self.imp.on_insert(Box::new(callback)))
+    }
+
+    fn remove_on_insert(&self, callback: ClaimMetaInsertCallbackId) {
+        self.imp.remove_on_insert(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithDelete for ClaimMetaTableHandle<'ctx> {
+    type DeleteCallbackId = ClaimMetaDeleteCallbackId;
+
+    fn on_delete(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> ClaimMetaDeleteCallbackId {
+        ClaimMetaDeleteCallbackId(self.imp.on_delete(Box::new(callback)))
+    }
+
+    fn remove_on_delete(&self, callback: ClaimMetaDeleteCallbackId) {
+        self.imp.remove_on_delete(callback.0)
+    }
+}
+
 pub struct ClaimMetaUpdateCallbackId(__sdk::CallbackId);
 
 impl<'ctx> __sdk::TableWithPrimaryKey for ClaimMetaTableHandle<'ctx> {
+    type UpdateCallbackId = ClaimMetaUpdateCallbackId;
+
+    fn on_update(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row, &Self::Row) + Send + 'static,
+    ) -> ClaimMetaUpdateCallbackId {
+        ClaimMetaUpdateCallbackId(self.imp.on_update(Box::new(callback)))
+    }
+
+    fn remove_on_update(&self, callback: ClaimMetaUpdateCallbackId) {
+        self.imp.remove_on_update(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithUpdate for ClaimMetaTableHandle<'ctx> {
     type UpdateCallbackId = ClaimMetaUpdateCallbackId;
 
     fn on_update(

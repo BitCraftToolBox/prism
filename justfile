@@ -8,7 +8,7 @@ default:
 
 # Publish the relay module to a SpacetimeDB server.
 publish-dev module="prism-relay" host="http://127.0.0.1:3000":
-    cd relay-module && spacetime version install 2.9.0 && spacetime version use 2.9.0 && spacetime publish --module-path . --server {{host}} {{module}}
+    cd relay-module && spacetime version use 2.9.0 && spacetime publish --module-path . --server {{host}} {{module}}
 
 # blocked - module gets published locally on prism server. can re-enable if this moves back to maincloud (lol)
 #publish-prod module="prism-relay" host="https://st.prism.brico.app":

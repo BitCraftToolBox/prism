@@ -482,6 +482,17 @@ pub async fn run(
                             region_id,
                         );
                     }
+                    RelayMsg::ReconcileCrafts { region_id, craft_ids } => {
+                        flush_craft_batch(&conn, &mut batches);
+                        info!(
+                            "relay: {} reconcile_crafts count={}",
+                            region_id,
+                            craft_ids.len()
+                        );
+                        if let Err(e) = conn.reconcile_crafts(region_id, craft_ids) {
+                            warn!("relay: reconcile_crafts: {e:?}");
+                        }
+                    }
                     RelayMsg::ReplaceClaims { region_id, meta_rows, info_rows, supply_rows } => {
                         flush_claim_batch(&conn, &mut batches);
                         let meta: Vec<ClaimMeta> = meta_rows.iter().map(to_claim_meta).collect();

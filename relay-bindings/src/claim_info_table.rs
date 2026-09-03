@@ -18,6 +18,18 @@ pub struct ClaimInfoTableHandle<'ctx> {
     ctx: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
+/// Lifetime-aware accessor marker for the table `claim_info`.
+pub struct ClaimInfoTableAccessor;
+
+impl __sdk::TableAccessor<super::RemoteTables> for ClaimInfoTableAccessor {
+    type Row = ClaimInfo;
+    type Handle<'db> = ClaimInfoTableHandle<'db>;
+
+    fn get<'db>(db: &'db super::RemoteTables) -> Self::Handle<'db> {
+        db.claim_info()
+    }
+}
+
 #[allow(non_camel_case_types)]
 /// Extension trait for access to the table `claim_info`.
 ///
@@ -39,6 +51,18 @@ impl ClaimInfoTableAccess for super::RemoteTables {
 
 pub struct ClaimInfoInsertCallbackId(__sdk::CallbackId);
 pub struct ClaimInfoDeleteCallbackId(__sdk::CallbackId);
+
+impl<'ctx> __sdk::TableLike for ClaimInfoTableHandle<'ctx> {
+    type Row = ClaimInfo;
+    type EventContext = super::EventContext;
+
+    fn count(&self) -> u64 {
+        self.imp.count()
+    }
+    fn iter(&self) -> impl Iterator<Item = ClaimInfo> + '_ {
+        self.imp.iter()
+    }
+}
 
 impl<'ctx> __sdk::Table for ClaimInfoTableHandle<'ctx> {
     type Row = ClaimInfo;
@@ -78,9 +102,54 @@ impl<'ctx> __sdk::Table for ClaimInfoTableHandle<'ctx> {
     }
 }
 
+impl<'ctx> __sdk::WithInsert for ClaimInfoTableHandle<'ctx> {
+    type InsertCallbackId = ClaimInfoInsertCallbackId;
+
+    fn on_insert(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> ClaimInfoInsertCallbackId {
+        ClaimInfoInsertCallbackId(self.imp.on_insert(Box::new(callback)))
+    }
+
+    fn remove_on_insert(&self, callback: ClaimInfoInsertCallbackId) {
+        self.imp.remove_on_insert(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithDelete for ClaimInfoTableHandle<'ctx> {
+    type DeleteCallbackId = ClaimInfoDeleteCallbackId;
+
+    fn on_delete(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> ClaimInfoDeleteCallbackId {
+        ClaimInfoDeleteCallbackId(self.imp.on_delete(Box::new(callback)))
+    }
+
+    fn remove_on_delete(&self, callback: ClaimInfoDeleteCallbackId) {
+        self.imp.remove_on_delete(callback.0)
+    }
+}
+
 pub struct ClaimInfoUpdateCallbackId(__sdk::CallbackId);
 
 impl<'ctx> __sdk::TableWithPrimaryKey for ClaimInfoTableHandle<'ctx> {
+    type UpdateCallbackId = ClaimInfoUpdateCallbackId;
+
+    fn on_update(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row, &Self::Row) + Send + 'static,
+    ) -> ClaimInfoUpdateCallbackId {
+        ClaimInfoUpdateCallbackId(self.imp.on_update(Box::new(callback)))
+    }
+
+    fn remove_on_update(&self, callback: ClaimInfoUpdateCallbackId) {
+        self.imp.remove_on_update(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithUpdate for ClaimInfoTableHandle<'ctx> {
     type UpdateCallbackId = ClaimInfoUpdateCallbackId;
 
     fn on_update(

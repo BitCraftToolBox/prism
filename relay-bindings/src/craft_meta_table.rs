@@ -19,6 +19,18 @@ pub struct CraftMetaTableHandle<'ctx> {
     ctx: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
+/// Lifetime-aware accessor marker for the table `craft_meta`.
+pub struct CraftMetaTableAccessor;
+
+impl __sdk::TableAccessor<super::RemoteTables> for CraftMetaTableAccessor {
+    type Row = CraftMeta;
+    type Handle<'db> = CraftMetaTableHandle<'db>;
+
+    fn get<'db>(db: &'db super::RemoteTables) -> Self::Handle<'db> {
+        db.craft_meta()
+    }
+}
+
 #[allow(non_camel_case_types)]
 /// Extension trait for access to the table `craft_meta`.
 ///
@@ -40,6 +52,18 @@ impl CraftMetaTableAccess for super::RemoteTables {
 
 pub struct CraftMetaInsertCallbackId(__sdk::CallbackId);
 pub struct CraftMetaDeleteCallbackId(__sdk::CallbackId);
+
+impl<'ctx> __sdk::TableLike for CraftMetaTableHandle<'ctx> {
+    type Row = CraftMeta;
+    type EventContext = super::EventContext;
+
+    fn count(&self) -> u64 {
+        self.imp.count()
+    }
+    fn iter(&self) -> impl Iterator<Item = CraftMeta> + '_ {
+        self.imp.iter()
+    }
+}
 
 impl<'ctx> __sdk::Table for CraftMetaTableHandle<'ctx> {
     type Row = CraftMeta;
@@ -79,9 +103,54 @@ impl<'ctx> __sdk::Table for CraftMetaTableHandle<'ctx> {
     }
 }
 
+impl<'ctx> __sdk::WithInsert for CraftMetaTableHandle<'ctx> {
+    type InsertCallbackId = CraftMetaInsertCallbackId;
+
+    fn on_insert(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> CraftMetaInsertCallbackId {
+        CraftMetaInsertCallbackId(self.imp.on_insert(Box::new(callback)))
+    }
+
+    fn remove_on_insert(&self, callback: CraftMetaInsertCallbackId) {
+        self.imp.remove_on_insert(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithDelete for CraftMetaTableHandle<'ctx> {
+    type DeleteCallbackId = CraftMetaDeleteCallbackId;
+
+    fn on_delete(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
+    ) -> CraftMetaDeleteCallbackId {
+        CraftMetaDeleteCallbackId(self.imp.on_delete(Box::new(callback)))
+    }
+
+    fn remove_on_delete(&self, callback: CraftMetaDeleteCallbackId) {
+        self.imp.remove_on_delete(callback.0)
+    }
+}
+
 pub struct CraftMetaUpdateCallbackId(__sdk::CallbackId);
 
 impl<'ctx> __sdk::TableWithPrimaryKey for CraftMetaTableHandle<'ctx> {
+    type UpdateCallbackId = CraftMetaUpdateCallbackId;
+
+    fn on_update(
+        &self,
+        callback: impl FnMut(&Self::EventContext, &Self::Row, &Self::Row) + Send + 'static,
+    ) -> CraftMetaUpdateCallbackId {
+        CraftMetaUpdateCallbackId(self.imp.on_update(Box::new(callback)))
+    }
+
+    fn remove_on_update(&self, callback: CraftMetaUpdateCallbackId) {
+        self.imp.remove_on_update(callback.0)
+    }
+}
+
+impl<'ctx> __sdk::WithUpdate for CraftMetaTableHandle<'ctx> {
     type UpdateCallbackId = CraftMetaUpdateCallbackId;
 
     fn on_update(

@@ -132,12 +132,20 @@ pub async fn handle(
                 recipe_rows.len(),
                 crafts.len()
             ));
+            let craft_ids: Vec<u64> = crafts.iter().map(|c| c.entity_id).collect();
             history_msgs.push(HistoryMsg::UpsertRecipeMeta(recipe_rows.clone()));
             history_msgs.push(HistoryMsg::UpsertCrafts(crafts.clone()));
             relay_msgs.push(RelayMsg::ReplaceCrafts {
                 region_id,
                 recipe_rows,
                 rows: crafts,
+            });
+            // This snapshot is the full accurate upstream state for the
+            // region, so expire anything the relay still thinks is `Active`
+            // that isn't in it — covers deletes prism missed while offline.
+            relay_msgs.push(RelayMsg::ReconcileCrafts {
+                region_id,
+                craft_ids,
             });
         }
         if pipelines.claims {
