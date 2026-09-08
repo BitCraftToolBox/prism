@@ -90,9 +90,19 @@ pub enum RelayMsg {
     ToggleCraftPublic(Vec<CraftPublicUpdateRow>),
     ApplyCraftProgressDeltas(Vec<CraftContributionDeltaRow>),
     ScheduleCraftExpiry(Vec<CraftExpiryRow>),
+    /// Live-phase delta: full-row create for claims prism has not seen
+    /// before (no matching sync-phase snapshot). This is the only path that
+    /// brings a brand-new claim's `claim_info` row into existence outside of
+    /// `ReplaceClaims` — `UpdateClaimInfo` below is a no-op for rows that
+    /// don't exist yet.
+    UpsertClaimInfo(Vec<ClaimInfoRow>),
     /// Live-phase delta: targeted field updates to existing ClaimInfo rows
     /// (name/bank/marketplace/waystone/research), sent one field at a time.
     UpdateClaimInfo(Vec<ClaimInfoUpdate>),
+    /// Live-phase delta: upsert ClaimMeta rows (location + core building).
+    /// Sent for every `claim_local_state` change, including a claim's first
+    /// appearance — unlike ClaimInfo, meta has no separate create path.
+    UpsertClaimMeta(Vec<ClaimMetaRow>),
     /// Live-phase delta: upsert ClaimSupply rows (supplies/tiles/upkeep).
     UpsertClaimSupply(Vec<ClaimSupplyRow>),
     /// Live-phase delta: a claim was removed upstream; drop it from all tables.

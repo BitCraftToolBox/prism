@@ -79,7 +79,9 @@ pub mod set_players_offline_reducer;
 pub mod set_players_online_reducer;
 pub mod toggle_public_reducer;
 pub mod update_claim_info_reducer;
+pub mod upsert_claim_info_reducer;
 pub mod upsert_claim_members_reducer;
+pub mod upsert_claim_meta_reducer;
 pub mod upsert_claim_supply_reducer;
 pub mod upsert_crafts_reducer;
 pub mod upsert_herds_reducer;
@@ -161,7 +163,9 @@ pub use set_players_offline_reducer::set_players_offline;
 pub use set_players_online_reducer::set_players_online;
 pub use toggle_public_reducer::toggle_public;
 pub use update_claim_info_reducer::update_claim_info;
+pub use upsert_claim_info_reducer::upsert_claim_info;
 pub use upsert_claim_members_reducer::upsert_claim_members;
+pub use upsert_claim_meta_reducer::upsert_claim_meta;
 pub use upsert_claim_supply_reducer::upsert_claim_supply;
 pub use upsert_crafts_reducer::upsert_crafts;
 pub use upsert_herds_reducer::upsert_herds;
@@ -281,8 +285,14 @@ pub enum Reducer {
     UpdateClaimInfo {
         updates: Vec<ClaimInfoUpdate>,
     },
+    UpsertClaimInfo {
+        rows: Vec<ClaimInfo>,
+    },
     UpsertClaimMembers {
         rows: Vec<ClaimMember>,
+    },
+    UpsertClaimMeta {
+        rows: Vec<ClaimMeta>,
     },
     UpsertClaimSupply {
         rows: Vec<ClaimSupply>,
@@ -344,7 +354,9 @@ impl __sdk::Reducer for Reducer {
             Reducer::SetPlayersOnline { .. } => "set_players_online",
             Reducer::TogglePublic { .. } => "toggle_public",
             Reducer::UpdateClaimInfo { .. } => "update_claim_info",
+            Reducer::UpsertClaimInfo { .. } => "upsert_claim_info",
             Reducer::UpsertClaimMembers { .. } => "upsert_claim_members",
+            Reducer::UpsertClaimMeta { .. } => "upsert_claim_meta",
             Reducer::UpsertClaimSupply { .. } => "upsert_claim_supply",
             Reducer::UpsertCrafts { .. } => "upsert_crafts",
             Reducer::UpsertHerds { .. } => "upsert_herds",
@@ -535,8 +547,18 @@ impl __sdk::Reducer for Reducer {
                     updates: updates.clone(),
                 })
             }
+            Reducer::UpsertClaimInfo { rows } => {
+                __sats::bsatn::to_vec(&upsert_claim_info_reducer::UpsertClaimInfoArgs {
+                    rows: rows.clone(),
+                })
+            }
             Reducer::UpsertClaimMembers { rows } => {
                 __sats::bsatn::to_vec(&upsert_claim_members_reducer::UpsertClaimMembersArgs {
+                    rows: rows.clone(),
+                })
+            }
+            Reducer::UpsertClaimMeta { rows } => {
+                __sats::bsatn::to_vec(&upsert_claim_meta_reducer::UpsertClaimMetaArgs {
                     rows: rows.clone(),
                 })
             }

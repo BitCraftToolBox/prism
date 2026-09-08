@@ -83,7 +83,9 @@ struct Batches {
     craft_public_updates: Vec<CraftPublicUpdate>,
     craft_progress_deltas: Vec<CraftContributionDelta>,
     craft_expiries: Vec<CraftExpiry>,
+    claim_info_creates: Vec<ClaimInfo>,
     claim_info_updates: Vec<BindingsClaimInfoUpdate>,
+    claim_meta_upserts: Vec<ClaimMeta>,
     claim_supply_upserts: Vec<ClaimSupply>,
     claim_deletes: Vec<u64>,
     claim_member_upserts: Vec<ClaimMember>,
@@ -596,9 +598,17 @@ pub async fn run(
                         batches.craft_expiries.extend(rows.iter().map(to_craft_expiry));
                         if batches.craft_expiries.len() >= MAX_BATCH { flush_craft_batch(&conn, &mut batches); }
                     }
+                    RelayMsg::UpsertClaimInfo(rows) => {
+                        batches.claim_info_creates.extend(rows.iter().map(to_claim_info));
+                        if batches.claim_info_creates.len() >= MAX_BATCH { flush_claim_batch(&conn, &mut batches); }
+                    }
                     RelayMsg::UpdateClaimInfo(rows) => {
                         batches.claim_info_updates.extend(rows.iter().map(to_claim_info_update));
                         if batches.claim_info_updates.len() >= MAX_BATCH { flush_claim_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::UpsertClaimMeta(rows) => {
+                        batches.claim_meta_upserts.extend(rows.iter().map(to_claim_meta));
+                        if batches.claim_meta_upserts.len() >= MAX_BATCH { flush_claim_batch(&conn, &mut batches); }
                     }
                     RelayMsg::UpsertClaimSupply(rows) => {
                         batches.claim_supply_upserts.extend(rows.iter().map(to_claim_supply));
@@ -697,7 +707,9 @@ pub async fn run(
             _ = claim_tick.tick() => {
                 if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
                 histogram!("prism_relay_batch_depth", "pipeline" => "claim")
-                    .record((batches.claim_info_updates.len()
+                    .record((batches.claim_info_creates.len()
+                        + batches.claim_info_updates.len()
+                        + batches.claim_meta_upserts.len()
                         + batches.claim_supply_upserts.len()
                         + batches.claim_deletes.len()
                         + batches.claim_member_upserts.len()
@@ -993,6 +1005,17 @@ fn flush_craft_batch(conn: &RelayConnection, batches: &mut Batches) {
 }
 
 fn flush_claim_batch(conn: &RelayConnection, batches: &mut Batches) {
+    // Creates before updates: a same-window field update for a brand-new
+    // claim needs the row to already exist, or it silently no-ops.
+    if !batches.claim_info_creates.is_empty() {
+        let rows = std::mem::take(&mut batches.claim_info_creates);
+        debug!("relay flush: upsert_claim_info count={}", rows.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "claim", "op" => "info_create")
+            .increment(rows.len() as u64);
+        if let Err(e) = conn.upsert_claim_info(rows) {
+            warn!("relay: upsert_claim_info: {e:?}");
+        }
+    }
     // Updates before deletes so a delete in the same window always wins.
     if !batches.claim_info_updates.is_empty() {
         let rows = std::mem::take(&mut batches.claim_info_updates);
@@ -1001,6 +1024,15 @@ fn flush_claim_batch(conn: &RelayConnection, batches: &mut Batches) {
             .increment(rows.len() as u64);
         if let Err(e) = conn.update_claim_info(rows) {
             warn!("relay: update_claim_info: {e:?}");
+        }
+    }
+    if !batches.claim_meta_upserts.is_empty() {
+        let rows = std::mem::take(&mut batches.claim_meta_upserts);
+        debug!("relay flush: upsert_claim_meta count={}", rows.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "claim", "op" => "meta")
+            .increment(rows.len() as u64);
+        if let Err(e) = conn.upsert_claim_meta(rows) {
+            warn!("relay: upsert_claim_meta: {e:?}");
         }
     }
     if !batches.claim_supply_upserts.is_empty() {

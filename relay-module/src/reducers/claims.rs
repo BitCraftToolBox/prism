@@ -58,8 +58,9 @@ pub struct ClaimInfoUpdate {
 }
 
 /// Live-phase: apply targeted field updates to `claim_info` rows. No-ops for
-/// entity_ids not already present (rows are created by `bulk_replace_claims`
-/// on the sync→live transition).
+/// entity_ids not already present — rows are created by `bulk_replace_claims`
+/// on the sync→live transition, or by `upsert_claim_info` for claims created
+/// afterward.
 #[reducer]
 pub fn update_claim_info(
     ctx: &ReducerContext,
@@ -90,6 +91,32 @@ pub fn upsert_claim_supply(ctx: &ReducerContext, rows: Vec<ClaimSupply>) -> Resu
     ensure_relay(ctx)?;
     for row in rows {
         ctx.db.claim_supply().entity_id().insert_or_update(row);
+    }
+    Ok(())
+}
+
+/// Live-phase: upsert ClaimMeta rows (location + core building). Unlike
+/// `claim_info`, meta has no separate "create" path — a claim's meta is
+/// always known in full as soon as `claim_local_state` arrives, so every
+/// live-phase change (including the claim's first appearance) upserts here.
+#[reducer]
+pub fn upsert_claim_meta(ctx: &ReducerContext, rows: Vec<ClaimMeta>) -> Result<(), String> {
+    ensure_relay(ctx)?;
+    for row in rows {
+        ctx.db.claim_meta().entity_id().insert_or_update(row);
+    }
+    Ok(())
+}
+
+/// Live-phase: create full `claim_info` rows for claims prism has not seen
+/// before (i.e. created after this instance's sync→live transition). Unlike
+/// `update_claim_info`, this is a true upsert — it's the only path that can
+/// bring a brand-new claim's row into existence outside `bulk_replace_claims`.
+#[reducer]
+pub fn upsert_claim_info(ctx: &ReducerContext, rows: Vec<ClaimInfo>) -> Result<(), String> {
+    ensure_relay(ctx)?;
+    for row in rows {
+        ctx.db.claim_info().entity_id().insert_or_update(row);
     }
     Ok(())
 }

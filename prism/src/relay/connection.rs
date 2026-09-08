@@ -32,7 +32,9 @@ use relay_bindings::{
     set_claim_owners_reducer::set_claim_owners, set_players_offline_reducer::set_players_offline,
     set_players_online_reducer::set_players_online, toggle_public_reducer::toggle_public,
     update_claim_info_reducer::update_claim_info,
+    upsert_claim_info_reducer::upsert_claim_info,
     upsert_claim_members_reducer::upsert_claim_members,
+    upsert_claim_meta_reducer::upsert_claim_meta,
     upsert_claim_supply_reducer::upsert_claim_supply, upsert_crafts_reducer::upsert_crafts,
     upsert_herds_reducer::upsert_herds, upsert_player_states_reducer::upsert_player_states,
     upsert_players_reducer::upsert_players, upsert_recipe_meta_reducer::upsert_recipe_meta,
@@ -358,10 +360,24 @@ impl RelayConnection {
             .map_err(|e| anyhow!("{e:?}"))
     }
 
+    pub fn upsert_claim_info(&self, rows: Vec<ClaimInfo>) -> Result<()> {
+        self.conn
+            .reducers
+            .upsert_claim_info(rows)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
     pub fn update_claim_info(&self, rows: Vec<ClaimInfoUpdate>) -> Result<()> {
         self.conn
             .reducers
             .update_claim_info(rows)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn upsert_claim_meta(&self, rows: Vec<ClaimMeta>) -> Result<()> {
+        self.conn
+            .reducers
+            .upsert_claim_meta(rows)
             .map_err(|e| anyhow!("{e:?}"))
     }
 

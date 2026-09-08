@@ -14,10 +14,10 @@ use super::join::{
 };
 use crate::history::HistoryMsg;
 use crate::relay::{
-    ClaimInfoField, ClaimInfoUpdate, ClaimMemberRow, ClaimOwnerRow, ClaimSupplyRow,
-    CraftContributionDeltaRow, CraftExpiryRow, CraftExpiryStatus, CraftPublicUpdateRow,
-    CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, PlayerRow, PlayerStateRow, RecipeMetaRow,
-    RelayMsg, ResourceRow,
+    ClaimInfoField, ClaimInfoRow, ClaimInfoUpdate, ClaimMemberRow, ClaimMetaRow, ClaimOwnerRow,
+    ClaimSupplyRow, CraftContributionDeltaRow, CraftExpiryRow, CraftExpiryStatus,
+    CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, PlayerRow,
+    PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow,
 };
 use crate::upstream::{GrowthTimerSubRequest, Phase, RegionUpdate};
 use anyhow::Result;
@@ -656,7 +656,9 @@ fn emit_deltas(
     let mut craft_public_updates: Vec<CraftPublicUpdateRow> = Vec::new();
     let mut craft_progress_deltas: Vec<CraftContributionDeltaRow> = Vec::new();
     let mut craft_expiries: Vec<CraftExpiryRow> = Vec::new();
+    let mut claim_meta_upserts: Vec<ClaimMetaRow> = Vec::new();
     let mut claim_supply_upserts: Vec<ClaimSupplyRow> = Vec::new();
+    let mut claim_info_creates: Vec<ClaimInfoRow> = Vec::new();
     let mut claim_info_updates: Vec<ClaimInfoUpdate> = Vec::new();
     let mut claim_deletes: Vec<u64> = Vec::new();
     let mut claim_member_upserts: Vec<ClaimMemberRow> = Vec::new();
@@ -1096,6 +1098,13 @@ fn emit_deltas(
             // Update touched only untracked fields (e.g. xp) — ignore.
             continue;
         }
+        claim_meta_upserts.push(ClaimMetaRow {
+            entity_id: eid,
+            region_id,
+            x: new.x,
+            z: new.z,
+            building_desc_id: new.building_desc_id,
+        });
         claim_supply_upserts.push(ClaimSupplyRow {
             entity_id: eid,
             region_id,
@@ -1116,27 +1125,41 @@ fn emit_deltas(
         if claim_delete_set.contains(&eid) {
             continue;
         }
-        let name_changed = update
+        let existing_delete = update
             .claim_state
             .deletes
             .iter()
-            .find(|d| d.row.entity_id == eid)
-            .map(|d| d.row.name != e.row.name)
-            .unwrap_or(true);
-        if name_changed {
-            claim_info_updates.push(ClaimInfoUpdate {
-                entity_id: eid,
-                field: ClaimInfoField::Name(e.row.name.clone()),
-            });
+            .find(|d| d.row.entity_id == eid);
+        match existing_delete {
+            None => {
+                // Brand-new claim (no matching same-batch delete): the relay
+                // has never seen this entity_id, so a targeted field update
+                // would silently no-op (see update_claim_info). Create the
+                // full row instead; bank/marketplace/waystone/research start
+                // empty and get filled in by their own tables' inserts,
+                // independently of whether the claim is new.
+                claim_info_creates.push(ClaimInfoRow {
+                    entity_id: eid,
+                    region_id,
+                    name: e.row.name.clone(),
+                    bank: false,
+                    marketplace: false,
+                    waystone: false,
+                    research: Vec::new(),
+                });
+            }
+            Some(prev) if prev.row.name != e.row.name => {
+                claim_info_updates.push(ClaimInfoUpdate {
+                    entity_id: eid,
+                    field: ClaimInfoField::Name(e.row.name.clone()),
+                });
+            }
+            _ => {}
         }
         // Ownership lives on `claim_member` as a derived flag, so an owner
         // change is handed to the relay module as the claim's new owner id and
         // it re-derives the flag across that claim's membership rows.
-        let owner_changed = update
-            .claim_state
-            .deletes
-            .iter()
-            .find(|d| d.row.entity_id == eid)
+        let owner_changed = existing_delete
             .map(|d| d.row.owner_player_entity_id != e.row.owner_player_entity_id)
             .unwrap_or(true);
         if owner_changed {
@@ -1359,10 +1382,22 @@ fn emit_deltas(
             std::iter::once(RelayMsg::ScheduleCraftExpiry(craft_expiries)),
         );
     }
+    if !claim_meta_upserts.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::UpsertClaimMeta(claim_meta_upserts)),
+        );
+    }
     if !claim_supply_upserts.is_empty() {
         send_relay(
             &sinks.relay_tx,
             std::iter::once(RelayMsg::UpsertClaimSupply(claim_supply_upserts)),
+        );
+    }
+    if !claim_info_creates.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::UpsertClaimInfo(claim_info_creates)),
         );
     }
     if !claim_info_updates.is_empty() {
