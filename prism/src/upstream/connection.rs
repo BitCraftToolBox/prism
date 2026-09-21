@@ -20,7 +20,7 @@ use upstream_bindings::region::{DbConnection, DbUpdate, Reducer};
 // `region::SubscriptionHandle` type.
 use upstream_bindings::sdk::{DbContext, Event, SubscriptionHandle as _};
 
-use super::subscription::{Pipeline, enabled_pipelines, queue_subscribe};
+use super::subscription::{enabled_pipelines, queue_subscribe};
 use super::{Phase, RegionUpdate};
 use crate::config::{Config, DumpScheduleConfig, RegionConfig};
 use crate::dumper::table_extract::SupportedTable;
@@ -129,7 +129,6 @@ pub async fn run_region(
                     region_id: drain_region,
                     phase,
                     update: update.0,
-                    reducer: update.1,
                 });
             }
         });
@@ -139,14 +138,12 @@ pub async fn run_region(
         let region_name_for_disconnect = region.name.clone();
         let connected_this_attempt = Arc::new(AtomicBool::new(false));
         let connected_flag = connected_this_attempt.clone();
-        let light = !pipelines.contains(&Pipeline::Crafts);
 
         info!("[{}] connecting...", region.name);
         let built = DbConnection::builder()
             .with_uri(&host)
-            .with_module_name(&region.name)
+            .with_database_name(&region.name)
             .with_token(Some(&token))
-            .with_light_mode(light)
             .with_channel_and_event(cache_tx.clone())
             .on_connect(move |ctx, _id, _tok| {
                 connected_flag.store(true, Ordering::Relaxed);
@@ -437,9 +434,8 @@ async fn run_dump_schedule(
 
         let built = DbConnection::builder()
             .with_uri(&host)
-            .with_module_name(&module_name)
+            .with_database_name(&module_name)
             .with_token(Some(&token))
-            .with_light_mode(true)
             .with_channel(cache_tx.clone())
             .on_connect(move |ctx, _id, _tok| {
                 info!(

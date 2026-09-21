@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
-use upstream_bindings::region::{DbUpdate, Reducer};
+use upstream_bindings::region::DbUpdate;
 
 use crate::config::Config;
 use crate::dumper::DumpMsg;
@@ -33,7 +33,6 @@ use crate::shutdown::SharedShutdown;
 use log::{error, info};
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
-use upstream_bindings::sdk::Event;
 
 /// A region update destined for the processor. Carries the originating region
 /// id and the sync phase at the moment it was drained from the cacheless
@@ -42,7 +41,6 @@ pub struct RegionUpdate {
     pub region_id: u8,
     pub phase: Phase,
     pub update: DbUpdate,
-    pub reducer: Event<Reducer>,
 }
 
 /// A request from the processor back to a region's live connection: subscribe

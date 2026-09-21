@@ -45,8 +45,8 @@ use crate::shutdown::SharedShutdown;
 
 const PLAYER_FLUSH_MS: u64 = 500;
 const ENEMY_FLUSH_MS: u64 = 1000;
-const RESOURCE_FLUSH_MS: u64 = 2500;
-const CRAFT_FLUSH_MS: u64 = 2500;
+const RESOURCE_FLUSH_MS: u64 = 1000;
+const CRAFT_FLUSH_MS: u64 = 500;
 const CLAIM_FLUSH_MS: u64 = 2500;
 
 const MAX_BATCH: usize = 50_000;

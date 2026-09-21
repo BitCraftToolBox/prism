@@ -21,8 +21,8 @@ use relay_bindings::{
     DbConnection, ErrorContext, HerdLocation, HerdLocationTableAccess, ResourceLocation,
     ResourceLocationTableAccess, SubscriptionEventContext,
 };
-use relay_sdk::{DbContext, SubscriptionHandle, Table};
 use serde::{Deserialize, Serialize};
+use spacetimedb_sdk::{DbContext, SubscriptionHandle, Table};
 
 use crate::config::RelayConfig;
 use crate::tile_generator::check_canceled;
@@ -241,7 +241,7 @@ fn subscribe_and_collect_resources(
         .on_applied(move |_ctx: &SubscriptionEventContext| {
             let _ = tx.send(Ok(()));
         })
-        .on_error(move |_ctx: &ErrorContext, e: relay_sdk::Error| {
+        .on_error(move |_ctx: &ErrorContext, e: spacetimedb_sdk::Error| {
             let _ = tx_err.send(Err(format!("{:?}", e)));
         })
         .subscribe(vec![query]);
@@ -290,7 +290,7 @@ fn subscribe_and_collect_herds(
         .on_applied(move |_ctx: &SubscriptionEventContext| {
             let _ = tx.send(Ok(()));
         })
-        .on_error(move |_ctx: &ErrorContext, e: relay_sdk::Error| {
+        .on_error(move |_ctx: &ErrorContext, e: spacetimedb_sdk::Error| {
             let _ = tx_err.send(Err(format!("{:?}", e)));
         })
         .subscribe(vec![query]);

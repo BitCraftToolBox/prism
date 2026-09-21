@@ -25,6 +25,7 @@ use log::{debug, info, warn};
 use metrics::counter;
 use std::collections::{HashMap, HashSet};
 use upstream_bindings::region::DbUpdate;
+use upstream_bindings::sdk::Timestamp;
 
 const OVERWORLD_DIM: u32 = 1;
 
@@ -42,7 +43,6 @@ pub async fn handle(
         region_id,
         phase,
         update,
-        reducer,
     } = msg;
 
     // On the first Syncing update for this region (e.g. after a reconnect),
@@ -70,7 +70,7 @@ pub async fn handle(
     if !region.is_live {
         region.is_live = true;
         let pipelines = &sinks.pipelines;
-        let timestamp_micros = event_timestamp_micros(&reducer);
+        let timestamp_micros = Timestamp::now().to_micros_since_unix_epoch();
 
         let mut relay_msgs = Vec::new();
         let mut history_msgs = Vec::new();
@@ -222,7 +222,7 @@ pub async fn handle(
     }
 
     // Normal delta mode: emit incremental upserts/deletes derived from this batch.
-    emit_deltas(region_id, &update, &reducer, region, sinks);
+    emit_deltas(region_id, &update, region, sinks);
     Ok(())
 }
 
@@ -601,7 +601,6 @@ macro_rules! record_all_table_counts {
 fn emit_deltas(
     region_id: u8,
     update: &DbUpdate,
-    reducer: &upstream_bindings::sdk::Event<upstream_bindings::region::Reducer>,
     region: &super::join::RegionJoinState,
     sinks: &ProcessorHandle,
 ) {
@@ -992,14 +991,8 @@ fn emit_deltas(
     }
 
     // Progressive action deltas drive craft lifecycle + contribution accounting.
-    let caller_player_id = match reducer {
-        upstream_bindings::sdk::Event::Reducer(ev) => {
-            region.user_identity_map.get(&ev.caller_identity).copied()
-        }
-        _ => None,
-    };
     for e in &update.progressive_action_state.inserts {
-        let update_timestamp_micros = event_timestamp_micros(reducer);
+        let update_timestamp_micros = Timestamp::now().to_micros_since_unix_epoch();
         let craft_id = e.row.entity_id;
         if let Some(prev) = update
             .progressive_action_state
@@ -1009,7 +1002,12 @@ fn emit_deltas(
         {
             let delta = e.row.progress - prev.row.progress;
             if delta != 0
-                && let Some(player_id) = caller_player_id
+                && let Some(player_id) = update
+                    .craft_event
+                    .inserts
+                    .iter()
+                    .find(|ev| ev.row.target_entity_id == craft_id)
+                    .map(|ev| ev.row.actor_entity_id)
             {
                 craft_progress_deltas.push(CraftContributionDeltaRow {
                     craft_id,
@@ -1044,11 +1042,6 @@ fn emit_deltas(
             });
         }
     }
-    // A delete with no matching insert means the craft is gone upstream. The
-    // relay keeps it for another 24h so clients don't see crafts vanish, so
-    // stamp *why* it went away — otherwise a collected craft keeps reading as
-    // "done, ready to collect" and a canceled one as "open for work".
-    let removal_status = craft_removal_status(reducer);
     for e in &update.progressive_action_state.deletes {
         if !update
             .progressive_action_state
@@ -1058,7 +1051,7 @@ fn emit_deltas(
         {
             craft_expiries.push(CraftExpiryRow {
                 craft_id: e.row.entity_id,
-                status: removal_status,
+                status: CraftExpiryStatus::Removed,
             });
         }
     }
@@ -1513,35 +1506,5 @@ fn send_history(
     }
     if dropped > 0 {
         debug!("history channel full — dropped {} messages", dropped);
-    }
-}
-
-/// Why a craft's upstream row disappeared. The collect reducers hand out the
-/// crafted items, so those are `Claimed`; anything else (cancellation, the
-/// building being destroyed, a server-side cleanup) is `Removed`.
-fn craft_removal_status(
-    reducer: &upstream_bindings::sdk::Event<upstream_bindings::region::Reducer>,
-) -> CraftExpiryStatus {
-    match reducer {
-        upstream_bindings::sdk::Event::Reducer(ev) => match ev.reducer {
-            upstream_bindings::region::Reducer::CraftCollect { .. }
-            | upstream_bindings::region::Reducer::CraftCollectAll { .. } => {
-                CraftExpiryStatus::Claimed
-            }
-            _ => CraftExpiryStatus::Removed,
-        },
-        _ => CraftExpiryStatus::Removed,
-    }
-}
-
-fn event_timestamp_micros(
-    reducer: &upstream_bindings::sdk::Event<upstream_bindings::region::Reducer>,
-) -> i64 {
-    match reducer {
-        upstream_bindings::sdk::Event::Reducer(ev) => ev.timestamp.to_micros_since_unix_epoch(),
-        _ => std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_micros() as i64)
-            .unwrap_or(0),
     }
 }

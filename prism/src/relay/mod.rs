@@ -228,13 +228,14 @@ pub struct CraftUpdateRow {
 /// `Active`, that state is stamped by the relay module on upsert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CraftExpiryStatus {
-    Claimed,
+    #[allow(dead_code)]
+    Claimed, // Currently not used, but might be again in the future
     Removed,
 }
 
 /// A craft whose upstream `progressive_action_state` row was deleted. The relay
 /// module stamps `status` onto the craft and drops the row 24h later, so
-/// consumers can tell a collected craft from a canceled one in the meantime.
+/// consumers can tell an active craft from a canceled/removed one in the meantime.
 #[derive(Debug, Clone)]
 pub struct CraftExpiryRow {
     pub craft_id: u64,

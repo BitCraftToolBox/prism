@@ -94,6 +94,7 @@ impl Pipeline {
                 "SELECT * FROM user_state;".into(),
                 "SELECT * FROM progressive_action_state;".into(),
                 "SELECT * FROM public_progressive_action_state;".into(),
+                "SELECT * FROM craft_event;".into(),
                 "SELECT * FROM building_state;".into(),
             ],
             Pipeline::Claims => vec![
@@ -206,7 +207,6 @@ where
     C: DbContext<
             DbView = <DbConnection as DbContext>::DbView,
             Reducers = <DbConnection as DbContext>::Reducers,
-            SetReducerFlags = <DbConnection as DbContext>::SetReducerFlags,
             SubscriptionBuilder = <DbConnection as DbContext>::SubscriptionBuilder,
         >,
 {
