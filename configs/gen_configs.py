@@ -3,14 +3,14 @@ import sys
 
 region_groups = {
     # temp regions
-    (4, "temp"): [3, 11, 15, 23],
+    #(4, "temp"): [3, 11, 15, 23],
     # main regions
     (3, "top"): [17, 18, 19],
     (2, "mid"): [12, 13, 14],
     (1, "bot"): [7, 8, 9],
 }
 
-mapper = [7, 8, 9, 12, 13, 14, 17, 18, 19, 3, 11, 15, 23]
+mapper = [7, 8, 9, 12, 13, 14, 17, 18, 19]#, 3, 11, 15, 23]
 craft_mon = list(mapper)
 
 out_dir = sys.argv[1] if len(sys.argv) > 1 else ""
