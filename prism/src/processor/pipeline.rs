@@ -1482,7 +1482,8 @@ fn has_progressive_action_state_change(update: &DbUpdate, eid: u64) -> bool {
 fn send_relay(tx: &tokio::sync::mpsc::Sender<RelayMsg>, msgs: impl Iterator<Item = RelayMsg>) {
     let mut dropped = 0usize;
     for msg in msgs {
-        if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = tx.try_send(msg) {
+        if let Err(tokio::sync::mpsc::error::TrySendError::Full(msg)) = tx.try_send(msg) {
+            counter!("prism_relay_dropped_total", "kind" => msg.kind()).increment(1);
             dropped += 1;
         }
     }

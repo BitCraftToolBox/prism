@@ -134,6 +134,53 @@ pub enum RelayMsg {
     RenamePlayers(Vec<PlayerRenameRow>),
 }
 
+impl RelayMsg {
+    /// Stable metric label for this message type, e.g. `resource_insert`,
+    /// `claim_delete`. Exhaustive so new variants must pick a label.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            RelayMsg::ReplaceResources { .. } => "resource_replace",
+            RelayMsg::ReplaceGrowthTimers { .. } => "growth_timer_replace",
+            RelayMsg::ReplaceEnemies { .. } => "enemy_replace",
+            RelayMsg::ReplaceHerds { .. } => "herd_replace",
+            RelayMsg::ReplacePlayers { .. } => "player_replace",
+            RelayMsg::ReplacePlayerStates { .. } => "player_state_replace",
+            RelayMsg::ReplaceCrafts { .. } => "craft_replace",
+            RelayMsg::ReconcileCrafts { .. } => "craft_reconcile",
+            RelayMsg::ReplaceClaims { .. } => "claim_replace",
+            RelayMsg::ReplaceClaimMembers { .. } => "claim_member_replace",
+            RelayMsg::InsertResource(_) => "resource_insert",
+            RelayMsg::InsertGrowthTimer(_) => "growth_timer_insert",
+            RelayMsg::InsertEnemy(_) => "enemy_insert",
+            RelayMsg::UpsertHerd(_) => "herd_upsert",
+            RelayMsg::UpsertPlayer(_) => "player_upsert",
+            RelayMsg::UpsertPlayerState(_) => "player_state_upsert",
+            RelayMsg::UpsertCrafts(_) => "craft_upsert",
+            RelayMsg::UpsertRecipeMeta(_) => "recipe_meta_upsert",
+            RelayMsg::DeleteRecipeMeta(_) => "recipe_meta_delete",
+            RelayMsg::ToggleCraftPublic(_) => "craft_public",
+            RelayMsg::ApplyCraftProgressDeltas(_) => "craft_progress",
+            RelayMsg::ScheduleCraftExpiry(_) => "craft_expiry",
+            RelayMsg::UpsertClaimInfo(_) => "claim_info_upsert",
+            RelayMsg::UpdateClaimInfo(_) => "claim_info_update",
+            RelayMsg::UpsertClaimMeta(_) => "claim_meta_upsert",
+            RelayMsg::UpsertClaimSupply(_) => "claim_supply_upsert",
+            RelayMsg::DeleteClaims(_) => "claim_delete",
+            RelayMsg::UpsertClaimMembers(_) => "claim_member_upsert",
+            RelayMsg::DeleteClaimMembers(_) => "claim_member_delete",
+            RelayMsg::SetClaimOwners(_) => "claim_owner_set",
+            RelayMsg::UpsertRegions(_) => "region_upsert",
+            RelayMsg::DeleteResource(_) => "resource_delete",
+            RelayMsg::DeleteEnemy(_) => "enemy_delete",
+            RelayMsg::DeleteHerd(_) => "herd_delete",
+            RelayMsg::MoveMobileEntities(_) => "mobile_move",
+            RelayMsg::SetPlayersOnline(_) => "player_online",
+            RelayMsg::SetPlayersOffline(_) => "player_offline",
+            RelayMsg::RenamePlayers(_) => "player_rename",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MobileMoveRow {
     pub entity_id: u64,
