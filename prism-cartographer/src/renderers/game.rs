@@ -13,7 +13,6 @@ use std::sync::atomic::AtomicBool;
 
 use crate::tile_generator::{self, check_canceled};
 
-const URL_ROOT: &str = "https://maps.game.bitcraftonline.com/world-maps";
 const MAP_NAME: &str = "TerrainMap";
 
 /// Width/height of the tile grid (5 regions × 80 chunks × 10 px/chunk).
@@ -34,11 +33,11 @@ const RENDER_SIZE: u32 = 38400;
 /// map server and producing a WebP tile pyramid.
 ///
 /// Tiles are written directly into `tiles_dir` (`{z}/{x}/{y}.webp`).
-pub fn render(tiles_dir: &Path, canceled: &AtomicBool) -> Result<()> {
+pub fn render(game_map_url: &str, tiles_dir: &Path, canceled: &AtomicBool) -> Result<()> {
     std::fs::create_dir_all(tiles_dir)
         .with_context(|| format!("Failed to create {}", tiles_dir.display()))?;
 
-    let data = download_gwm(MAP_NAME)?;
+    let data = download_gwm(game_map_url, MAP_NAME)?;
     check_canceled(canceled)?;
 
     let width = MAP_SIZE;
@@ -109,8 +108,8 @@ pub fn render(tiles_dir: &Path, canceled: &AtomicBool) -> Result<()> {
     Ok(())
 }
 
-fn download_gwm(name: &str) -> Result<Vec<u8>> {
-    let url = format!("{}/{}.gwm", URL_ROOT, name);
+fn download_gwm(url_root: &str, name: &str) -> Result<Vec<u8>> {
+    let url = format!("{}/{}.gwm", url_root.trim_end_matches('/'), name);
     log::info!("[game] downloading {}", url);
     let dl_start = std::time::Instant::now();
     let compressed = reqwest::blocking::get(&url)

@@ -420,7 +420,9 @@ fn run_renderer(
             tiles_dir,
             canceled,
         ),
-        RendererKind::Game => crate::renderers::game::render(tiles_dir, canceled),
+        RendererKind::Game => {
+            crate::renderers::game::render(&config.game_map_url, tiles_dir, canceled)
+        }
         RendererKind::Roads => crate::renderers::roads::render(
             &config.input_dir,
             &config.region_prefix,

@@ -8,6 +8,10 @@ region_prefix = "bitcraft-live-"
 # Root directory for all rendered output.
 output_dir = "output"
 
+# Base URL the "game" renderer downloads .gwm world maps from
+# (fetches "{game_map_url}/TerrainMap.gwm"). Optional; this is the default.
+game_map_url = "https://maps.game.bitcraftonline.com/world-maps"
+
 # Optional: command to run after each successful render commit.
 # Two placeholders are expanded before the command is executed:
 #   {}      — absolute path of the committed output directory

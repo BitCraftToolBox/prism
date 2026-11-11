@@ -15,6 +15,11 @@ pub struct Config {
     /// Root directory for all rendered output.
     pub output_dir: PathBuf,
 
+    /// Base URL the `game` renderer downloads `.gwm` world maps from.
+    /// The file fetched is `{game_map_url}/TerrainMap.gwm`.
+    #[serde(default = "default_game_map_url")]
+    pub game_map_url: String,
+
     /// Scheduled rendering tasks.
     #[serde(default)]
     pub tasks: Vec<TaskConfig>,
@@ -47,6 +52,10 @@ pub struct RelayConfig {
 
 fn default_region_prefix() -> String {
     "bitcraft-live-".to_string()
+}
+
+fn default_game_map_url() -> String {
+    "https://maps.game.bitcraftonline.com/world-maps".to_string()
 }
 
 /// A single scheduled render task.
