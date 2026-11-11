@@ -5,6 +5,7 @@ interface FileConfig {
     input_dir?: string;
     output_dir?: string;
     upstream_hostname?: string;
+    upstream_module?: string;
     upstream_token?: string;
 }
 
@@ -12,6 +13,7 @@ export interface RuntimeConfig {
     input_dir: string;
     output_dir: string;
     upstream_hostname: string;
+    upstream_module: string;
     upstream_token: string;
     config_path: string;
 }
@@ -41,6 +43,7 @@ export function load_config(args: string[]): RuntimeConfig {
     const input_dir_raw = parsed.input_dir;
     const output_dir_raw = parsed.output_dir;
     const upstream_hostname = parsed.upstream_hostname ?? "https://bitcraft-early-access.spacetimedb.com";
+    const upstream_module = parsed.upstream_module ?? "bitcraft-live-global";
     const upstream_token = process.env.PRISM_UPSTREAM_TOKEN ?? parsed.upstream_token;
 
     if (!input_dir_raw || !output_dir_raw) {
@@ -55,6 +58,7 @@ export function load_config(args: string[]): RuntimeConfig {
         input_dir: path.resolve(base_dir, input_dir_raw),
         output_dir: path.resolve(base_dir, output_dir_raw),
         upstream_hostname,
+        upstream_module,
         upstream_token,
         config_path,
     };

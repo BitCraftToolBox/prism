@@ -2,13 +2,11 @@ import {DbConnection as DbConnectionGlobal,} from "../bindings_global/src";
 import {RuntimeConfig} from "./config";
 import {GlobalData} from "./types";
 
-const GLOBAL_MODULE = "bitcraft-live-global";
-
 export async function fetch_global_data(config: RuntimeConfig): Promise<GlobalData> {
     return new Promise<GlobalData>((resolve, reject) => {
         DbConnectionGlobal.builder()
             .withUri(config.upstream_hostname)
-            .withModuleName(GLOBAL_MODULE)
+            .withModuleName(config.upstream_module)
             .withToken(config.upstream_token)
             .onConnect((conn) => {
                 conn

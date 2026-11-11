@@ -35,6 +35,7 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     const runStart = performance.now();
     const config = load_config(args);
     fs.mkdirSync(config.output_dir, {recursive: true});
+    console.log("Starting feature extraction.", config.input_dir, config.output_dir, config.upstream_hostname, config.upstream_module);
 
     const [region_data, parseSecs] = time(() => load_region_data(config.input_dir));
     jsonParseDuration.observe(parseSecs);
