@@ -186,6 +186,83 @@ function resolve_empire_colors(global_data: GlobalData, empire: EmpireState | un
     };
 }
 
+const PALETTE_EMPIRE_ID = BigInt(131);
+
+// Empires listed here ignore their emblem colors; their territories are colored from this palette instead
+const TERRITORY_COLOR_PALETTE = [
+    "#0000ff",
+    "#ff0000",
+    "#00ff00",
+    "#c71585",
+    "#00ffff",
+    "#808000",
+    "#1e90ff",
+];
+
+function territory_chunk_key(chunk_x: number, chunk_z: number): string {
+    return `${chunk_x},${chunk_z}`;
+}
+
+// True if any chunk in a is edge-adjacent to any chunk in b
+function are_territories_adjacent(a: WatchtowerTerritory, b: WatchtowerTerritory): boolean {
+    const chunk_set_a = new Set(a.chunk_groups.flatMap((g) => g.chunks.map((c) => territory_chunk_key(c.chunk_x, c.chunk_z))));
+    for (const group of b.chunk_groups) {
+        for (const chunk of group.chunks) {
+            for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                if (chunk_set_a.has(territory_chunk_key(chunk.chunk_x + dx, chunk.chunk_z + dz))) return true;
+            }
+        }
+    }
+    return false;
+}
+
+// True if the watchtower location of a is within distance_chunks (in chunks) of any chunk in b
+function are_territories_nearby(a: WatchtowerTerritory, b: WatchtowerTerritory, distance_chunks: number): boolean {
+    const dist_sq = distance_chunks * distance_chunks;
+    const chunk_ax = Math.floor(a.location.x / 96);
+    const chunk_az = Math.floor(a.location.z / 96);
+    for (const group of b.chunk_groups) {
+        for (const chunk of group.chunks) {
+            const dx = chunk_ax - chunk.chunk_x;
+            const dz = chunk_az - chunk.chunk_z;
+            if (dx * dx + dz * dz <= dist_sq) return true;
+        }
+    }
+    return false;
+}
+
+// Greedy-color territories so that adjacent/nearby territories get different palette colors
+function assign_territory_colors(territories: WatchtowerTerritory[], palette: string[], nearby_distance = 10) {
+    const n = territories.length;
+    const adj = Array.from({length: n}, () => new Set<number>());
+    for (let i = 0; i < n; ++i) {
+        for (let j = i + 1; j < n; ++j) {
+            if (are_territories_adjacent(territories[i], territories[j]) ||
+                are_territories_nearby(territories[i], territories[j], nearby_distance) ||
+                are_territories_nearby(territories[j], territories[i], nearby_distance)) {
+                adj[i].add(j);
+                adj[j].add(i);
+            }
+        }
+    }
+
+    const colors: number[] = Array(n).fill(-1);
+    for (let i = 0; i < n; ++i) {
+        const used = new Set(Array.from(adj[i]).map((j) => colors[j]));
+        for (let c = 0; c < palette.length; ++c) {
+            if (!used.has(c)) {
+                colors[i] = c;
+                break;
+            }
+        }
+        if (colors[i] === -1) {
+            console.log(`Warning: not enough colors for territory ${territories[i].name}, assigning default color`);
+            colors[i] = 0;
+        }
+        territories[i].color = palette[colors[i]];
+    }
+}
+
 export function build_watchtower_territories(
     claim_states: ClaimStateData[],
     local_state_map: Map<bigint, ClaimLocalStateData>,
@@ -232,6 +309,8 @@ export function build_watchtower_territories(
             outline_color: colors.outline,
         });
     }
+
+    assign_territory_colors(territories.filter((t) => t.owner_id === PALETTE_EMPIRE_ID), TERRITORY_COLOR_PALETTE);
 
     return territories;
 }
