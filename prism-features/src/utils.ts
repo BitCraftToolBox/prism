@@ -1,4 +1,4 @@
-const TIER_TECH_IDS = [200, 300, 400, 500, 600, 700, 800, 900, 1000];
+const TIER_TECH_IDS = [1, 1623246356, 43715291, 443589242, 1461951487, 1510210914, 1756599942, 1976017717, 442389180];
 
 export function format_template_args(value: string): string {
     if (!value.includes("|~")) return value;
