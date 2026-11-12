@@ -1,6 +1,7 @@
 **/target
 **/node_modules
 **/config.toml
+**/config.json
 **/.env
 
 dumps/

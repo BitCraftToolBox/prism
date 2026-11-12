@@ -17,6 +17,7 @@ export async function fetch_global_data(config: RuntimeConfig): Promise<GlobalDa
                             empire_chunk_state: Array.from(conn.db.empireChunkState.iter()),
                             empire_color_desc: Array.from(conn.db.empireColorDesc.iter()),
                             empire_emblem_state: Array.from(conn.db.empireEmblemState.iter()),
+                            building_map_icon_desc: Array.from(conn.db.buildingMapIconDesc.iter()),
                         };
                         conn.disconnect();
                         resolve(data);
@@ -26,6 +27,7 @@ export async function fetch_global_data(config: RuntimeConfig): Promise<GlobalDa
                         "SELECT * FROM empire_chunk_state",
                         "SELECT * FROM empire_color_desc",
                         "SELECT * FROM empire_emblem_state",
+                        "SELECT * FROM building_map_icon_desc",
                     ]);
             })
             .onConnectError((_ctx, err) => {

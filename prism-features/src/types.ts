@@ -1,4 +1,4 @@
-import {EmpireChunkState, EmpireColorDesc, EmpireEmblemState, EmpireState,} from "../bindings_global/src";
+import {BuildingMapIconDesc, EmpireChunkState, EmpireColorDesc, EmpireEmblemState, EmpireState,} from "../bindings_global/src";
 
 export interface TileLocation {
     dimension: number;
@@ -65,6 +65,7 @@ export interface GlobalData {
     empire_chunk_state: EmpireChunkState[];
     empire_color_desc: EmpireColorDesc[];
     empire_emblem_state: EmpireEmblemState[];
+    building_map_icon_desc: BuildingMapIconDesc[];
 }
 
 export function get_some_location(option: JsonOptionSome<TileLocation> | undefined): TileLocation | undefined {

@@ -1,4 +1,4 @@
-import {ClaimLocalStateData, ClaimStateData, ClaimTechStateData, get_some_location, RegionData,} from "./types";
+import {ClaimLocalStateData, ClaimStateData, ClaimTechStateData, get_some_location, GlobalData, RegionData,} from "./types";
 import {compute_claim_tier, format_template_args} from "./utils";
 import {make_tower_feature, WatchtowerTerritory} from "./watchtower";
 
@@ -9,13 +9,13 @@ export interface OutputData {
     caves: unknown[];
     trees: unknown[];
     empireResources: any[];
-    uncharted: any[];
     events: any[];
     npcs: any[];
     temples: unknown[];
     dungeons: unknown[];
     grids: unknown[];
     claims: unknown[];
+    gameIcons: unknown[];
 }
 
 interface ClaimExtras {
@@ -24,7 +24,12 @@ interface ClaimExtras {
     market_claim_ids: Set<bigint>;
     waystone_claim_ids: Set<bigint>;
     claim_tech_map: Map<bigint, ClaimTechStateData>;
+    game_icons: Map<number, {title: string; fontIcon: string}>;
 }
+
+// Buildings that have a game icon but are already emitted by another feature set:
+// hexite deposit, ancient hexite reservoir, maker's tree (empireResources) and hexite vault (events).
+const gameIconExcluded = new Set([421789207, 1506763792, 1375306631, 578530093]);
 
 function make_feature(props: Record<string, unknown>, x: number, z: number): unknown {
     return {
@@ -34,8 +39,15 @@ function make_feature(props: Record<string, unknown>, x: number, z: number): unk
     };
 }
 
-export function make_claim_extras(data: RegionData): ClaimExtras {
+export function make_claim_extras(data: RegionData, global_data: GlobalData): ClaimExtras {
+    const game_icons = new Map<number, {title: string; fontIcon: string}>();
+    for (const row of global_data.building_map_icon_desc) {
+        // skips the empty placeholder row and buildings covered elsewhere
+        if (!row.iconAddress || gameIconExcluded.has(row.buildingId)) continue;
+        game_icons.set(row.buildingId, {title: row.title, fontIcon: row.iconAddress});
+    }
     return {
+        game_icons,
         regional_bank_claim_ids: new Set(data.regional_bank_state.map((row) => row.claim_entity_id)),
         bank_claim_ids: new Set(data.bank_state.map((row) => row.claim_entity_id)),
         market_claim_ids: new Set(data.marketplace_state.map((row) => row.claim_entity_id)),
@@ -50,13 +62,13 @@ export function create_outputs(): OutputData {
         caves: [],
         trees: [],
         empireResources: [],
-        uncharted: [],
         events: [],
         npcs: [],
         temples: [],
         dungeons: [],
         grids: [],
         claims: [],
+        gameIcons: [],
     };
 }
 
@@ -71,6 +83,11 @@ export function add_feature(
     if (!location) return;
 
     const claim_name = format_template_args(claim_state.name);
+
+    const game_icon = claim_extras.game_icons.get(local_state.building_description_id);
+    if (game_icon) {
+        outputs.gameIcons.push(make_feature({name: game_icon.title, fontIcon: game_icon.fontIcon}, location.x, location.z));
+    }
 
     switch (local_state.building_description_id) {
         case 433549604:
@@ -91,36 +108,6 @@ export function add_feature(
                 type: 'vault-event',
                 timer: null,
                 iconName: 'vault-event'
-            }, location.x, location.z));
-            break;
-        case 719999256:
-            outputs.uncharted.push(make_feature({
-                name: claim_name,
-                iconName: 'volcanic-geyser'
-            }, location.x, location.z));
-            break;
-        case 1503293649:
-            outputs.uncharted.push(make_feature({
-                name: claim_name,
-                iconName: 'hermit-crab',
-            }, location.x, location.z));
-            break;
-        case 203609893:
-            outputs.uncharted.push(make_feature({
-                name: claim_name,
-                iconName: 'shipwreck',
-            }, location.x, location.z));
-            break;
-        case 26020371:
-            outputs.uncharted.push(make_feature({
-                name: claim_name,
-                iconName: 'uncharted-ruin'
-            }, location.x, location.z));
-            break;
-        case 159732292:
-            outputs.uncharted.push(make_feature({
-                name: claim_name,
-                iconName: 'silkmoth-grounds'
             }, location.x, location.z));
             break;
         case 489406613:
@@ -165,7 +152,6 @@ export function add_feature(
         case 208697589:
         case 1084069097:
         case 846734170:
-        case 1385919449:
             outputs.dungeons.push(
                 make_feature(
                     {

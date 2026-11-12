@@ -48,7 +48,7 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
 
     const genTimer = geojsonGenerationDuration.startTimer({layer: 'all'});
     const local_state_map = new Map(region_data.claim_local_state.map((row) => [row.entity_id, row]));
-    const claim_extras = make_claim_extras(region_data);
+    const claim_extras = make_claim_extras(region_data, global_data);
     const territories = build_watchtower_territories(region_data.claim_state, local_state_map, global_data);
 
     const outputs = create_outputs();
@@ -69,7 +69,6 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     write_json(config.output_dir, "caves", outputs.caves);
     write_json(config.output_dir, "trees", outputs.trees);
     write_json(config.output_dir, "empireResources", outputs.empireResources);
-    write_json(config.output_dir, "uncharted", outputs.uncharted);
     write_json(config.output_dir, "events", outputs.events);
     write_json(config.output_dir, "npcs", outputs.npcs);
     write_json(config.output_dir, "temples", outputs.temples);
@@ -77,6 +76,7 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     write_json(config.output_dir, "towers", {type: "FeatureCollection", features: outputs.towers});
     write_json(config.output_dir, "grids", {type: "FeatureCollection", features: outputs.grids});
     write_json(config.output_dir, "claims", {type: "FeatureCollection", features: outputs.claims});
+    write_json(config.output_dir, "gameIcons", {type: "FeatureCollection", features: outputs.gameIcons});
 
     runDuration.observe((performance.now() - runStart) / 1000);
 }
