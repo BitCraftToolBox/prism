@@ -19,6 +19,7 @@ export interface OutputData {
 }
 
 interface ClaimExtras {
+    regional_bank_claim_ids: Set<bigint>;
     bank_claim_ids: Set<bigint>;
     market_claim_ids: Set<bigint>;
     waystone_claim_ids: Set<bigint>;
@@ -35,6 +36,7 @@ function make_feature(props: Record<string, unknown>, x: number, z: number): unk
 
 export function make_claim_extras(data: RegionData): ClaimExtras {
     return {
+        regional_bank_claim_ids: new Set(data.regional_bank_state.map((row) => row.claim_entity_id)),
         bank_claim_ids: new Set(data.bank_state.map((row) => row.claim_entity_id)),
         market_claim_ids: new Set(data.marketplace_state.map((row) => row.claim_entity_id)),
         waystone_claim_ids: new Set(data.waystone_state.map((row) => row.claim_entity_id)),
@@ -75,9 +77,12 @@ export function add_feature(
             outputs.trees.push(make_feature({name: claim_name, type: "tree"}, location.x, location.z));
             break;
         case 421789207:
+        case 1506763792:
         case 1375306631: {
-            const type = local_state.building_description_id === 421789207 ? 'hexite' : 'makers-tree';
-            outputs.empireResources.push(make_feature({name: claim_name, type, timer: null}, location.x, location.z));
+            const type = local_state.building_description_id === 1375306631 ? 'makers-tree' : 'hexite';
+            outputs.empireResources.push(make_feature({
+                name: claim_name, type, timer: null, building_desc: local_state.building_description_id
+            }, location.x, location.z));
             break;
         }
         case 578530093:
@@ -189,6 +194,7 @@ export function add_feature(
                         name: claim_name,
                         tier,
                         has_bank: claim_extras.bank_claim_ids.has(claim_state.entity_id) ? 1 : 0,
+                        has_regional_bank: claim_extras.regional_bank_claim_ids.has(claim_state.entity_id) ? 1 : 0,
                         has_market: claim_extras.market_claim_ids.has(claim_state.entity_id) ? 1 : 0,
                         has_waystone: claim_extras.waystone_claim_ids.has(claim_state.entity_id) ? 1 : 0,
                     },

@@ -37,6 +37,10 @@ export interface BankStateData {
     claim_entity_id: bigint;
 }
 
+export interface RegionalBankStateData {
+    claim_entity_id: bigint;
+}
+
 export interface MarketplaceStateData {
     claim_entity_id: bigint;
 }
@@ -50,6 +54,7 @@ export interface RegionData {
     claim_local_state: ClaimLocalStateData[];
     world_region_name_state: WorldRegionNameStateData[];
     bank_state: BankStateData[];
+    regional_bank_state: RegionalBankStateData[];
     marketplace_state: MarketplaceStateData[];
     waystone_state: WaystoneStateData[];
     claim_tech_state: ClaimTechStateData[];

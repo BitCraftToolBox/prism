@@ -1,14 +1,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  BankStateData,
-  ClaimLocalStateData,
-  ClaimStateData,
-  ClaimTechStateData,
-  MarketplaceStateData,
-  RegionData,
-  WaystoneStateData,
-  WorldRegionNameStateData,
+    BankStateData,
+    ClaimLocalStateData,
+    ClaimStateData,
+    ClaimTechStateData,
+    MarketplaceStateData,
+    RegionalBankStateData,
+    RegionData,
+    WaystoneStateData,
+    WorldRegionNameStateData,
 } from "./types";
 
 function bigint_reviver(_key: string, value: unknown): unknown {
@@ -31,7 +32,7 @@ function read_json_file<T>(file_path: string, fallback: T): T {
 
 function infer_region_id(region_dir: string): number {
     const base = path.basename(region_dir);
-    const match = base.match(/bitcraft-live-(\d+)/);
+    const match = base.match(/(?:bitcraft-live|idc)-(\d+)/);
     if (!match) return 0;
     return Number(match[1]);
 }
@@ -56,6 +57,7 @@ export function load_region_data(input_dir: string): RegionData {
         claim_local_state: [],
         world_region_name_state: [],
         bank_state: [],
+        regional_bank_state: [],
         marketplace_state: [],
         waystone_state: [],
         claim_tech_state: [],
@@ -66,6 +68,7 @@ export function load_region_data(input_dir: string): RegionData {
         const claim_local_state = read_json_file<ClaimLocalStateData[]>(path.join(region_dir, "claim_local_state.json"), []);
         const claim_tech_state = read_json_file<ClaimTechStateData[]>(path.join(region_dir, "claim_tech_state.json"), []);
         const bank_state = read_json_file<BankStateData[]>(path.join(region_dir, "bank_state.json"), []);
+        const regional_bank_state = read_json_file<RegionalBankStateData[]>(path.join(region_dir, "regional_bank_state.json"), []);
         const marketplace_state = read_json_file<MarketplaceStateData[]>(path.join(region_dir, "marketplace_state.json"), []);
         const waystone_state = read_json_file<WaystoneStateData[]>(path.join(region_dir, "waystone_state.json"), []);
 
@@ -86,6 +89,7 @@ export function load_region_data(input_dir: string): RegionData {
         combined.claim_local_state.push(...claim_local_state);
         combined.claim_tech_state.push(...claim_tech_state);
         combined.bank_state.push(...bank_state);
+        combined.regional_bank_state.push(...regional_bank_state);
         combined.marketplace_state.push(...marketplace_state);
         combined.waystone_state.push(...waystone_state);
     }
