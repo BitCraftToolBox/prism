@@ -148,10 +148,11 @@ export function add_feature(
                 ),
             );
             break;
-        case 1785852446:
-        case 208697589:
-        case 1084069097:
-        case 846734170:
+        case 1785852446: // giant skitch
+        case 208697589: // starseeker armory (sentinel)
+        case 1084069097: // araknir den
+        case 846734170: // alpha jakyl (small icon)
+        case 853770752: // abandoned immortal outpost
             outputs.dungeons.push(
                 make_feature(
                     {
