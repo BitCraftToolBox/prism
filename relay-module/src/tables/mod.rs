@@ -6,6 +6,7 @@ pub mod enemies;
 pub mod players;
 pub mod regions;
 pub mod resources;
+pub mod trades;
 
 /// Single-row config table holding the identity of the authorized relay client.
 #[table(accessor = relay_config)]

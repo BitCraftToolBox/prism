@@ -12,8 +12,8 @@ use relay_bindings::{
     ClaimInfo, ClaimInfoUpdate, ClaimMember, ClaimMeta, ClaimOwnerUpdate, ClaimSupply,
     CraftContributionDelta, CraftExpiry, CraftPublicUpdate, CraftUpdate, DbConnection,
     EnemyLocation, GrowthTimerUpdate, HerdLocation, MobileMoveUpdate, PlayerLocation,
-    PlayerRenameUpdate, PlayerState, RecipeMeta, Region, ResourceLocation,
-    apply_craft_progress_deltas_reducer::apply_craft_progress_deltas,
+    PlayerRenameUpdate, PlayerState, RecipeMeta, Region, ResourceLocation, ShopInfoUpdate,
+    TradeEvent, TradeOrder, apply_craft_progress_deltas_reducer::apply_craft_progress_deltas,
     bulk_replace_claim_members_reducer::bulk_replace_claim_members,
     bulk_replace_claims_reducer::bulk_replace_claims,
     bulk_replace_enemies_reducer::bulk_replace_enemies,
@@ -21,22 +21,26 @@ use relay_bindings::{
     bulk_replace_player_states_reducer::bulk_replace_player_states,
     bulk_replace_players_reducer::bulk_replace_players,
     bulk_replace_resources_reducer::bulk_replace_resources,
+    bulk_replace_trade_orders_reducer::bulk_replace_trade_orders,
     delete_claim_members_reducer::delete_claim_members, delete_claims_reducer::delete_claims,
     delete_enemies_reducer::delete_enemies, delete_herds_reducer::delete_herds,
     delete_player_states_reducer::delete_player_states, delete_players_reducer::delete_players,
     delete_recipe_meta_reducer::delete_recipe_meta, delete_resources_reducer::delete_resources,
-    init_relay_reducer::init_relay, insert_enemies_reducer::insert_enemies,
-    insert_growth_timers_reducer::insert_growth_timers, insert_resources_reducer::insert_resources,
+    delete_trade_orders_reducer::delete_trade_orders, init_relay_reducer::init_relay,
+    insert_enemies_reducer::insert_enemies, insert_growth_timers_reducer::insert_growth_timers,
+    insert_resources_reducer::insert_resources, insert_trade_events_reducer::insert_trade_events,
     move_mobile_entities_reducer::move_mobile_entities, reconcile_crafts_reducer::reconcile_crafts,
     rename_players_reducer::rename_players, schedule_craft_expiry_reducer::schedule_craft_expiry,
     set_claim_owners_reducer::set_claim_owners, set_players_offline_reducer::set_players_offline,
-    set_players_online_reducer::set_players_online, toggle_public_reducer::toggle_public,
-    update_claim_info_reducer::update_claim_info, upsert_claim_info_reducer::upsert_claim_info,
+    set_players_online_reducer::set_players_online, set_shop_info_reducer::set_shop_info,
+    toggle_public_reducer::toggle_public, update_claim_info_reducer::update_claim_info,
+    upsert_claim_info_reducer::upsert_claim_info,
     upsert_claim_members_reducer::upsert_claim_members,
     upsert_claim_meta_reducer::upsert_claim_meta, upsert_claim_supply_reducer::upsert_claim_supply,
     upsert_crafts_reducer::upsert_crafts, upsert_herds_reducer::upsert_herds,
     upsert_player_states_reducer::upsert_player_states, upsert_players_reducer::upsert_players,
     upsert_recipe_meta_reducer::upsert_recipe_meta, upsert_regions_reducer::upsert_regions,
+    upsert_trade_orders_reducer::upsert_trade_orders,
 };
 use relay_sdk::DbContext;
 use tokio::sync::oneshot;
@@ -65,18 +69,18 @@ impl RelayConnection {
 
         let uri = cfg.uri.clone();
         let module = cfg.module.clone();
-        let token = cfg
-            .token
-            .clone()
-            .expect("Relay token missing, should have been validated in config.");
+        let token = cfg.token.clone();
 
         // build() establishes the WebSocket synchronously; run in a blocking
         // thread so we don't stall the tokio executor.
         tokio::task::spawn_blocking(move || {
-            let result = DbConnection::builder()
+            let mut builder = DbConnection::builder()
                 .with_uri(&uri)
-                .with_database_name(&module)
-                .with_token(Some(&token))
+                .with_database_name(&module);
+            if let Some(token) = token.as_deref() {
+                builder = builder.with_token(Some(token));
+            }
+            let result = builder
                 .on_connect(|_ctx, _id, _tok| {
                     info!("relay: connected to downstream module");
                 })
@@ -418,6 +422,41 @@ impl RelayConnection {
         self.conn
             .reducers
             .set_claim_owners(updates)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn bulk_replace_trade_orders(&self, region_id: u8, rows: Vec<TradeOrder>) -> Result<()> {
+        self.conn
+            .reducers
+            .bulk_replace_trade_orders(region_id, rows)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn upsert_trade_orders(&self, rows: Vec<TradeOrder>) -> Result<()> {
+        self.conn
+            .reducers
+            .upsert_trade_orders(rows)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn delete_trade_orders(&self, ids: Vec<u64>) -> Result<()> {
+        self.conn
+            .reducers
+            .delete_trade_orders(ids)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn set_shop_info(&self, updates: Vec<ShopInfoUpdate>) -> Result<()> {
+        self.conn
+            .reducers
+            .set_shop_info(updates)
+            .map_err(|e| anyhow!("{e:?}"))
+    }
+
+    pub fn insert_trade_events(&self, rows: Vec<TradeEvent>) -> Result<()> {
+        self.conn
+            .reducers
+            .insert_trade_events(rows)
             .map_err(|e| anyhow!("{e:?}"))
     }
 

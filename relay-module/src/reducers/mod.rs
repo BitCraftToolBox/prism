@@ -10,6 +10,7 @@ pub mod mobs;
 pub mod players;
 pub mod regions;
 pub mod resources;
+pub mod trades;
 
 pub(crate) fn ensure_relay(ctx: &ReducerContext) -> Result<(), String> {
     match ctx.db.relay_config().id().find(0) {

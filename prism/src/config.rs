@@ -4,6 +4,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
+use log::warn;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -131,6 +132,11 @@ pub struct PipelinesConfig {
     /// The four upstream region tables collated into the relay `region` table.
     #[serde(default = "default_true")]
     pub regions: bool,
+    /// Player-set barter stall trade orders (`trade_order_state`, joined with
+    /// shop claim/nickname) plus completed-sale events
+    /// (`barter_stall_inventory_event`).
+    #[serde(default = "default_true")]
+    pub trades: bool,
     /// Resource `tag`s (matched against `resource_desc.tag`) whose resources
     /// should receive a targeted `resource_growth_timer` subscription when they
     /// spawn. Feeds the same relay `growth_timer` table as the legacy
@@ -151,6 +157,7 @@ impl PipelinesConfig {
             || self.crafts
             || self.claims
             || self.regions
+            || self.trades
     }
 }
 
@@ -217,10 +224,11 @@ impl Config {
         }
         for r in &self.upstream.regions {
             if r.token.is_none() && self.upstream.default_token.is_none() {
-                return Err(anyhow!(
-                    "region {:?} has no token and no global default_token is set",
+                warn!(
+                    "region {:?} has no token and no global default_token is set; \
+                     connecting without one",
                     r.name
-                ));
+                );
             }
         }
         if self.pipelines.any_enabled() {
@@ -232,9 +240,10 @@ impl Config {
                     ));
                 }
                 Some(relay) if relay.token.is_none() => {
-                    return Err(anyhow!(
-                        "relay has no token; use config.toml or PRISM_RELAY_TOKEN env var"
-                    ));
+                    warn!(
+                        "relay has no token; connecting without one \
+                         (set it in config.toml or via PRISM_RELAY_TOKEN)"
+                    );
                 }
                 _ => {}
             }

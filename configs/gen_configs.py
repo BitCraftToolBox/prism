@@ -66,6 +66,7 @@ growth_timers = false
 crafts = false
 claims = false
 regions = false
+trades = false
 """
 m_d_1 = """
 [[upstream.regions.dumps]]
@@ -125,6 +126,7 @@ enemies = false
 players = false
 claims = false
 regions = false
+trades = true
 crafts = true
 """
 

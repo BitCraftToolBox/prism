@@ -52,6 +52,13 @@ pub enum Pipeline {
     /// `region_control_info`, collated into a single relay `region` row per
     /// region.
     Regions,
+    /// `trade_order_state` + `barter_stall_inventory_event` (completed sales,
+    /// an upstream event table), joined with `building_state` (claim),
+    /// `building_nickname_state` and `deployable_state_v2` (claim + nickname)
+    /// for each order's shop. Feeds the relay `trade_order` and `trade_event`
+    /// tables. `building_state` duplicates the Crafts subscription; identical
+    /// queries are deduped server-side.
+    Trades,
 }
 
 impl Pipeline {
@@ -111,6 +118,13 @@ impl Pipeline {
                 "SELECT * FROM world_region_state;".into(),
                 "SELECT * FROM region_control_info;".into(),
             ],
+            Pipeline::Trades => vec![
+                "SELECT * FROM building_state;".into(),
+                "SELECT * FROM building_nickname_state;".into(),
+                "SELECT * FROM deployable_state_v2;".into(),
+                "SELECT * FROM trade_order_state;".into(),
+                "SELECT * FROM barter_stall_inventory_event;".into(),
+            ],
         }
     }
 }
@@ -137,6 +151,9 @@ pub fn enabled_pipelines(cfg: &PipelinesConfig) -> Vec<Pipeline> {
     }
     if cfg.regions {
         out.push(Pipeline::Regions);
+    }
+    if cfg.trades {
+        out.push(Pipeline::Trades);
     }
     out
 }

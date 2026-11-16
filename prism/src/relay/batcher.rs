@@ -1,12 +1,12 @@
 //! Latency-tiered batcher for the relay sink.
 //!
-//! Five flush timers: players ~500ms, enemies ~1000ms, resources ~2500ms,
-//! crafts ~2500ms, claims ~2500ms.
+//! Six flush timers: players ~500ms, enemies ~1000ms, resources ~2500ms,
+//! crafts ~2500ms, claims ~2500ms, trades ~1000ms.
 //! Replace* messages flush immediately (in chunks to stay under the 32MB
 //! WebSocket limit). Deletes are batched with their respective pipeline.
 //!
 //! # Reconnect behavior
-//! Before every flush-tick (players, enemies, resources, crafts, claims) the batcher calls
+//! Before every flush-tick (players, enemies, resources, crafts, claims, trades) the batcher calls
 //! `ensure_connected`, which checks `conn.is_active()` and, if the connection
 //! has gone away, waits `RECONNECT_DELAY` and reconnects. Any upsert/delete
 //! rows buffered in `Batches` at the moment of disconnect are retained and
@@ -22,12 +22,12 @@ use anyhow::Result;
 use log::{debug, error, info, warn};
 use metrics::{counter, histogram};
 use relay_bindings::{
-    ClaimInfo, ClaimInfoField as BindingsClaimInfoField,
+    BarterStallInventoryChangeReason, ClaimInfo, ClaimInfoField as BindingsClaimInfoField,
     ClaimInfoUpdate as BindingsClaimInfoUpdate, ClaimMember, ClaimMeta,
     ClaimOwnerUpdate as BindingsClaimOwnerUpdate, ClaimSupply, CraftContributionDelta, CraftExpiry,
     CraftPublicUpdate, CraftStatus, CraftUpdate, EnemyLocation, GrowthTimerUpdate, HerdLocation,
-    MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate, PlayerState, RecipeMeta,
-    Region as BindingsRegion, ResourceLocation,
+    ItemStack, ItemType, MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate, PlayerState,
+    RecipeMeta, Region as BindingsRegion, ResourceLocation, ShopInfoUpdate, TradeEvent, TradeOrder,
 };
 use relay_sdk::Timestamp;
 use tokio::sync::mpsc::Receiver;
@@ -37,8 +37,9 @@ use super::connection::{RECONNECT_DELAY, RelayConnection};
 use super::{
     ClaimInfoField, ClaimInfoRow, ClaimInfoUpdate, ClaimMemberRow, ClaimMetaRow, ClaimOwnerRow,
     ClaimSupplyRow, CraftContributionDeltaRow, CraftExpiryRow, CraftExpiryStatus,
-    CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, MobileMoveRow,
-    PlayerRenameRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RegionRow, RelayMsg, ResourceRow,
+    CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, ItemKind,
+    ItemStackRow, MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow, RecipeMetaRow,
+    RegionRow, RelayMsg, ResourceRow, ShopInfoRow, TradeEventRow, TradeOrderRow,
 };
 use crate::config::{Config, RelayConfig};
 use crate::shutdown::SharedShutdown;
@@ -48,6 +49,7 @@ const ENEMY_FLUSH_MS: u64 = 1000;
 const RESOURCE_FLUSH_MS: u64 = 1000;
 const CRAFT_FLUSH_MS: u64 = 500;
 const CLAIM_FLUSH_MS: u64 = 2500;
+const TRADE_FLUSH_MS: u64 = 1000;
 
 const MAX_BATCH: usize = 50_000;
 
@@ -91,6 +93,10 @@ struct Batches {
     claim_member_upserts: Vec<ClaimMember>,
     claim_member_deletes: Vec<u64>,
     claim_owner_updates: Vec<BindingsClaimOwnerUpdate>,
+    trade_order_upserts: Vec<TradeOrder>,
+    trade_order_deletes: Vec<u64>,
+    shop_info_updates: Vec<ShopInfoUpdate>,
+    trade_event_inserts: Vec<TradeEvent>,
 }
 
 fn to_resource_location(r: &ResourceRow) -> ResourceLocation {
@@ -285,6 +291,56 @@ fn to_claim_supply(r: &ClaimSupplyRow) -> ClaimSupply {
     }
 }
 
+fn to_item_stack(r: &ItemStackRow) -> ItemStack {
+    ItemStack {
+        item_id: r.item_id,
+        quantity: r.quantity,
+        item_type: match r.kind {
+            ItemKind::Item => ItemType::Item,
+            ItemKind::Cargo => ItemType::Cargo,
+        },
+        durability: r.durability,
+    }
+}
+fn to_trade_order(r: &TradeOrderRow) -> TradeOrder {
+    TradeOrder {
+        id: r.id,
+        shop_entity_id: r.shop_entity_id,
+        remaining_stock: r.remaining_stock,
+        offer_items: r.offer_items.iter().map(to_item_stack).collect(),
+        required_items: r.required_items.iter().map(to_item_stack).collect(),
+        claim_entity_id: r.claim_entity_id,
+        region_id: r.region_id,
+        shop_name: r.shop_name.clone(),
+    }
+}
+fn to_shop_info_update(r: &ShopInfoRow) -> ShopInfoUpdate {
+    ShopInfoUpdate {
+        shop_entity_id: r.shop_entity_id,
+        claim_entity_id: r.claim_entity_id,
+        shop_name: r.shop_name.clone(),
+    }
+}
+fn to_trade_event(r: &TradeEventRow) -> TradeEvent {
+    TradeEvent {
+        // Auto-inc: the relay module ignores this.
+        id: 0,
+        region_id: r.region_id,
+        shop_entity_id: r.shop_entity_id,
+        claim_entity_id: r.claim_entity_id,
+        actor_entity_id: r.actor_entity_id,
+        // Prism only forwards sales (see TradeEventRow::from_upstream).
+        reason: BarterStallInventoryChangeReason::Sale,
+        trade_order_entity_id: Some(r.trade_order_entity_id),
+        trade_amount: Some(r.trade_amount),
+        added_items: r.added_items.iter().map(to_item_stack).collect(),
+        removed_items: r.removed_items.iter().map(to_item_stack).collect(),
+        treasury_coins_added: r.treasury_coins_added,
+        treasury_coins_removed: r.treasury_coins_removed,
+        timestamp: Timestamp::from_micros_since_unix_epoch(r.timestamp_micros),
+    }
+}
+
 /// Attempt to connect, retrying with backoff until successful or shutdown.
 /// Returns `None` if shutdown was triggered before a connection was made.
 async fn connect_with_retry(
@@ -375,6 +431,11 @@ pub async fn run(
     let mut claim_tick = interval_at(
         now + Duration::from_millis(CLAIM_FLUSH_MS),
         Duration::from_millis(CLAIM_FLUSH_MS),
+    );
+
+    let mut trade_tick = interval_at(
+        now + Duration::from_millis(TRADE_FLUSH_MS),
+        Duration::from_millis(TRADE_FLUSH_MS),
     );
 
     let mut batches = Batches::default();
@@ -519,6 +580,27 @@ pub async fn run(
                             region_id,
                         );
                     }
+                    RelayMsg::ReplaceTradeOrders { region_id, rows } => {
+                        flush_trade_batch(&conn, &mut batches);
+                        let relay_rows: Vec<TradeOrder> = rows.iter().map(to_trade_order).collect();
+                        // Unlike the chunked replaces above, an empty set must still
+                        // go through so stale orders for the region get wiped.
+                        info!(
+                            "relay: {} bulk_replace_trade_orders count={}",
+                            region_id,
+                            relay_rows.len()
+                        );
+                        let mut chunks = relay_rows.chunks(BULK_REPLACE_CHUNK);
+                        let first = chunks.next().unwrap_or_default().to_vec();
+                        if let Err(e) = conn.bulk_replace_trade_orders(region_id, first) {
+                            warn!("relay: bulk_replace_trade_orders: {e:?}");
+                        }
+                        for chunk in chunks {
+                            if let Err(e) = conn.upsert_trade_orders(chunk.to_vec()) {
+                                warn!("relay: bulk_trade_orders chunk failed: {e:?}");
+                            }
+                        }
+                    }
                     RelayMsg::InsertResource(row) => {
                         batches.resource_inserts.push(to_resource_location(&row));
                         if batches.resource_inserts.len() >= MAX_BATCH { flush_resource_batch(&conn, &mut batches); }
@@ -630,6 +712,22 @@ pub async fn run(
                         batches.claim_owner_updates.extend(rows.iter().map(to_claim_owner_update));
                         if batches.claim_owner_updates.len() >= MAX_BATCH { flush_claim_member_batch(&conn, &mut batches); }
                     }
+                    RelayMsg::UpsertTradeOrders(rows) => {
+                        batches.trade_order_upserts.extend(rows.iter().map(to_trade_order));
+                        if batches.trade_order_upserts.len() >= MAX_BATCH { flush_trade_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::DeleteTradeOrders(ids) => {
+                        batches.trade_order_deletes.extend(ids);
+                        if batches.trade_order_deletes.len() >= MAX_BATCH { flush_trade_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::SetShopInfo(rows) => {
+                        batches.shop_info_updates.extend(rows.iter().map(to_shop_info_update));
+                        if batches.shop_info_updates.len() >= MAX_BATCH { flush_trade_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::InsertTradeEvents(rows) => {
+                        batches.trade_event_inserts.extend(rows.iter().map(to_trade_event));
+                        if batches.trade_event_inserts.len() >= MAX_BATCH { flush_trade_batch(&conn, &mut batches); }
+                    }
                     // Regions are a handful of near-static rows; batching them
                     // would only delay them behind the claim tick.
                     RelayMsg::UpsertRegions(rows) => {
@@ -720,6 +818,18 @@ pub async fn run(
                 histogram!("prism_relay_flush_duration_seconds", "pipeline" => "claim")
                     .record(t.elapsed().as_secs_f64());
             }
+            _ = trade_tick.tick() => {
+                if !ensure_connected(&mut conn, relay, &shutdown).await { break; }
+                histogram!("prism_relay_batch_depth", "pipeline" => "trade")
+                    .record((batches.trade_order_upserts.len()
+                        + batches.trade_order_deletes.len()
+                        + batches.shop_info_updates.len()
+                        + batches.trade_event_inserts.len()) as f64);
+                let t = std::time::Instant::now();
+                flush_trade_batch(&conn, &mut batches);
+                histogram!("prism_relay_flush_duration_seconds", "pipeline" => "trade")
+                    .record(t.elapsed().as_secs_f64());
+            }
         }
     }
 
@@ -736,6 +846,7 @@ pub async fn run(
     flush_player_renames(&conn, &mut batches);
     flush_craft_batch(&conn, &mut batches);
     flush_claim_batch(&conn, &mut batches);
+    flush_trade_batch(&conn, &mut batches);
     info!("relay batcher: disconnecting...");
     conn.disconnect();
     Ok(())
@@ -1087,6 +1198,47 @@ fn flush_claim_member_batch(conn: &RelayConnection, batches: &mut Batches) {
             .increment(ids.len() as u64);
         if let Err(e) = conn.delete_claim_members(ids) {
             warn!("relay: delete_claim_members: {e:?}");
+        }
+    }
+}
+
+fn flush_trade_batch(conn: &RelayConnection, batches: &mut Batches) {
+    // Upserts, then shop info, then deletes: a shop update wants any order
+    // created by this same flush to already exist, and a delete should win.
+    if !batches.trade_order_upserts.is_empty() {
+        let rows = std::mem::take(&mut batches.trade_order_upserts);
+        debug!("relay flush: upsert_trade_orders count={}", rows.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "trade", "op" => "order_upsert")
+            .increment(rows.len() as u64);
+        if let Err(e) = conn.upsert_trade_orders(rows) {
+            warn!("relay: upsert_trade_orders: {e:?}");
+        }
+    }
+    if !batches.shop_info_updates.is_empty() {
+        let updates = std::mem::take(&mut batches.shop_info_updates);
+        debug!("relay flush: set_shop_info count={}", updates.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "trade", "op" => "shop_info")
+            .increment(updates.len() as u64);
+        if let Err(e) = conn.set_shop_info(updates) {
+            warn!("relay: set_shop_info: {e:?}");
+        }
+    }
+    if !batches.trade_order_deletes.is_empty() {
+        let ids = std::mem::take(&mut batches.trade_order_deletes);
+        debug!("relay flush: delete_trade_orders count={}", ids.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "trade", "op" => "order_delete")
+            .increment(ids.len() as u64);
+        if let Err(e) = conn.delete_trade_orders(ids) {
+            warn!("relay: delete_trade_orders: {e:?}");
+        }
+    }
+    if !batches.trade_event_inserts.is_empty() {
+        let rows = std::mem::take(&mut batches.trade_event_inserts);
+        debug!("relay flush: insert_trade_events count={}", rows.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "trade", "op" => "event_insert")
+            .increment(rows.len() as u64);
+        if let Err(e) = conn.insert_trade_events(rows) {
+            warn!("relay: insert_trade_events: {e:?}");
         }
     }
 }

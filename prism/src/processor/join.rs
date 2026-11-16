@@ -8,11 +8,14 @@
 
 use crate::relay::{
     ClaimInfoRow, ClaimMemberRow, ClaimMetaRow, ClaimSupplyRow, CraftUpdateRow, EnemyRow,
-    GrowthTimerRow, HerdRow, PlayerRow, PlayerStateRow, RecipeMetaRow, RegionRow, ResourceRow,
+    GrowthTimerRow, HerdRow, ItemKind, ItemStackRow, PlayerRow, PlayerStateRow, RecipeMetaRow,
+    RegionRow, ResourceRow, TradeEventRow, TradeOrderRow,
 };
 use hashbrown::{HashMap, HashSet};
-use upstream_bindings::region::CraftingRecipeDesc;
-use upstream_bindings::sdk::Identity;
+use upstream_bindings::region::{
+    BarterStallInventoryChangeReason, BarterStallInventoryEvent, CraftingRecipeDesc, ItemStack,
+    ItemType, TradeOrderState,
+};
 
 #[derive(Default)]
 pub struct JoinState {
@@ -53,8 +56,6 @@ pub struct RegionJoinState {
     pub last_location: HashMap<u64, EntityLocation>,
     /// False during initial subscription sync; true once all pipelines are live.
     pub is_live: bool,
-    /// identity -> player entity_id (maintained in both sync and live phases).
-    pub user_identity_map: HashMap<Identity, u64>,
     /// building_entity_id -> claim_entity_id (maintained in both sync and live phases).
     pub building_claim_map: HashMap<u64, u64>,
     /// recipe_id -> actions_required (sync-phase cache).
@@ -95,6 +96,23 @@ pub struct RegionJoinState {
     /// cleared by clear_live_caches). Live-phase membership changes are
     /// emitted as upserts/deletes directly from the update batch.
     pub claim_members: HashMap<u64, ClaimMemberData>,
+    /// building entity_id -> nickname (`building_nickname_state`). Maintained in
+    /// both phases and intentionally survives clear_live_caches: the live phase
+    /// needs it to join a shop name onto newly-inserted trade orders. Only named
+    /// buildings have a row, so it stays small.
+    pub building_nicknames: HashMap<u64, String>,
+    /// deployable entity_id -> claim/nickname (`deployable_state_v2`). Maintained
+    /// in both phases and retained, for the same reason as `building_nicknames`.
+    pub deployable_shops: HashMap<u64, ShopInfo>,
+    /// trade_order_state entity_id -> player-set order (sync phase only; cleared
+    /// by clear_live_caches). Traveler orders are never stored. Live-phase
+    /// changes are emitted as upserts/deletes directly from the update batch.
+    pub trade_orders: HashMap<u64, TradeOrderData>,
+    /// Valid `barter_stall_inventory_event` rows seen during sync (cleared by
+    /// clear_live_caches). The upstream table starts empty, so these are only
+    /// sales that happened while subscriptions were still being applied; they are
+    /// flushed to the relay with the snapshot so none are lost.
+    pub trade_events: Vec<TradeEventRow>,
     /// This region's projected `region` row, folded from the three upstream
     /// region tables. Maintained in both phases and intentionally survives
     /// clear_live_caches: there are only ~25 regions world-wide and the data is
@@ -145,6 +163,87 @@ impl ClaimMemberData {
             co_owner: self.co_owner,
             owner,
         }
+    }
+}
+
+/// A shop's claim (0 when none) and nickname (empty when unnamed).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShopInfo {
+    pub claim_entity_id: u64,
+    pub nickname: String,
+}
+
+/// The subset of a player-set `trade_order_state` row mirrored into the relay.
+/// The shop's claim/name are joined in at emit time, so they are not stored.
+#[derive(Clone, Debug)]
+pub struct TradeOrderData {
+    pub shop_entity_id: u64,
+    pub remaining_stock: i32,
+    pub offer_items: Vec<ItemStackRow>,
+    pub required_items: Vec<ItemStackRow>,
+}
+
+impl TradeOrderData {
+    /// `None` for traveler (NPC) orders, which the relay does not mirror.
+    pub fn from_row(row: &TradeOrderState) -> Option<Self> {
+        if row.traveler_trade_order_id.is_some() {
+            return None;
+        }
+        Some(Self {
+            shop_entity_id: row.shop_entity_id,
+            remaining_stock: row.remaining_stock,
+            offer_items: row.offer_items.iter().map(item_stack_row).collect(),
+            required_items: row.required_items.iter().map(item_stack_row).collect(),
+        })
+    }
+
+    pub fn into_row(self, id: u64, region_id: u8, shop: ShopInfo) -> TradeOrderRow {
+        TradeOrderRow {
+            id,
+            shop_entity_id: self.shop_entity_id,
+            remaining_stock: self.remaining_stock,
+            offer_items: self.offer_items,
+            required_items: self.required_items,
+            claim_entity_id: shop.claim_entity_id,
+            region_id,
+            shop_name: shop.nickname,
+        }
+    }
+}
+
+pub fn item_stack_row(item: &ItemStack) -> ItemStackRow {
+    ItemStackRow {
+        item_id: item.item_id,
+        quantity: item.quantity,
+        kind: match item.item_type {
+            ItemType::Item => ItemKind::Item,
+            ItemType::Cargo => ItemKind::Cargo,
+        },
+        durability: item.durability,
+    }
+}
+
+impl TradeEventRow {
+    /// Projects an upstream event row, dropping anything that is not a sale
+    /// against a known trade order with a trade amount. The server currently
+    /// emits nothing else, but that may change.
+    pub fn from_upstream(region_id: u8, row: &BarterStallInventoryEvent) -> Option<Self> {
+        if !matches!(row.reason, BarterStallInventoryChangeReason::Sale) {
+            return None;
+        }
+        Some(Self {
+            region_id,
+            shop_entity_id: row.shop_entity_id,
+            claim_entity_id: row.claim_entity_id,
+            actor_entity_id: row.actor_entity_id,
+            trade_order_entity_id: row.trade_order_entity_id?,
+            trade_amount: row.trade_amount?,
+            added_items: row.added_items.iter().map(item_stack_row).collect(),
+            removed_items: row.removed_items.iter().map(item_stack_row).collect(),
+            treasury_coins_added: row.treasury_coins_added,
+            treasury_coins_removed: row.treasury_coins_removed,
+            timestamp_micros: row.timestamp.to_micros_since_unix_epoch(),
+        })
     }
 }
 
@@ -326,6 +425,39 @@ impl RegionJoinState {
             .collect()
     }
 
+    /// Claim/nickname for a shop, which is either a deployable or a building.
+    /// Unknown shops resolve to no claim and no name.
+    pub fn shop_info(&self, shop_entity_id: u64) -> ShopInfo {
+        if let Some(info) = self.deployable_shops.get(&shop_entity_id) {
+            return info.clone();
+        }
+        ShopInfo {
+            claim_entity_id: self
+                .building_claim_map
+                .get(&shop_entity_id)
+                .copied()
+                .unwrap_or(0),
+            nickname: self
+                .building_nicknames
+                .get(&shop_entity_id)
+                .cloned()
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Collect all known player-set trade orders, with shop info joined, as relay
+    /// rows for a bulk replace.
+    pub fn snapshot_trade_orders(&self, region_id: u8) -> Vec<TradeOrderRow> {
+        self.trade_orders
+            .iter()
+            .map(|(&id, order)| {
+                order
+                    .clone()
+                    .into_row(id, region_id, self.shop_info(order.shop_entity_id))
+            })
+            .collect()
+    }
+
     pub fn snapshot_recipe_meta(&self) -> Vec<RecipeMetaRow> {
         self.recipe_map
             .iter()
@@ -473,7 +605,14 @@ impl RegionJoinState {
         // claim_member snapshot; live-phase changes are emitted as upserts /
         // deletes derived directly from update batches.
         self.claim_members = HashMap::default();
+        // trade_orders / trade_events are only needed for the initial snapshot;
+        // live-phase changes are emitted straight from update batches.
+        self.trade_orders = HashMap::default();
+        self.trade_events = Vec::default();
 
+        // building_nicknames and deployable_shops are retained: the live phase
+        // joins them onto new trade orders and diffs them to spot shop renames.
+        //
         // resource_desc_tags is retained: the live phase reads it to
         // decide which newly-inserted resources warrant a growth-timer sub.
         //

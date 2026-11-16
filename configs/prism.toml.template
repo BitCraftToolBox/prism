@@ -32,4 +32,5 @@ enemies = true
 players = true
 claims = true
 regions = true
+trades = false
 crafts = false

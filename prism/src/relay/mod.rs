@@ -76,6 +76,13 @@ pub enum RelayMsg {
         rows: Vec<ClaimMemberRow>,
     },
 
+    /// Snapshot-phase payload: full replacement of `trade_order` for a region.
+    /// Always sent, even when empty, so stale rows get wiped.
+    ReplaceTradeOrders {
+        region_id: u8,
+        rows: Vec<TradeOrderRow>,
+    },
+
     InsertResource(ResourceRow),
     InsertGrowthTimer(GrowthTimerRow),
     InsertEnemy(EnemyRow),
@@ -115,6 +122,16 @@ pub enum RelayMsg {
     /// Live-phase delta: claims that changed hands; the relay module re-derives
     /// the `owner` flag across each claim's membership rows.
     SetClaimOwners(Vec<ClaimOwnerRow>),
+    /// Live-phase delta: upsert `trade_order` rows (new orders, stock changes).
+    UpsertTradeOrders(Vec<TradeOrderRow>),
+    /// Live-phase delta: trade orders removed upstream.
+    DeleteTradeOrders(Vec<u64>),
+    /// Live-phase delta: a shop's claim/nickname changed; the relay module
+    /// updates every order in that shop.
+    SetShopInfo(Vec<ShopInfoRow>),
+    /// Completed sales (both the sync-phase backlog and live-phase rows). The
+    /// relay module keeps these for 24h.
+    InsertTradeEvents(Vec<TradeEventRow>),
     /// Full `region` rows. Regions are few (~25 world-wide) and near-static, so
     /// both the snapshot and live-phase changes send whole rows.
     UpsertRegions(Vec<RegionRow>),
@@ -149,6 +166,7 @@ impl RelayMsg {
             RelayMsg::ReconcileCrafts { .. } => "craft_reconcile",
             RelayMsg::ReplaceClaims { .. } => "claim_replace",
             RelayMsg::ReplaceClaimMembers { .. } => "claim_member_replace",
+            RelayMsg::ReplaceTradeOrders { .. } => "trade_order_replace",
             RelayMsg::InsertResource(_) => "resource_insert",
             RelayMsg::InsertGrowthTimer(_) => "growth_timer_insert",
             RelayMsg::InsertEnemy(_) => "enemy_insert",
@@ -169,6 +187,10 @@ impl RelayMsg {
             RelayMsg::UpsertClaimMembers(_) => "claim_member_upsert",
             RelayMsg::DeleteClaimMembers(_) => "claim_member_delete",
             RelayMsg::SetClaimOwners(_) => "claim_owner_set",
+            RelayMsg::UpsertTradeOrders(_) => "trade_order_upsert",
+            RelayMsg::DeleteTradeOrders(_) => "trade_order_delete",
+            RelayMsg::SetShopInfo(_) => "shop_info_set",
+            RelayMsg::InsertTradeEvents(_) => "trade_event_insert",
             RelayMsg::UpsertRegions(_) => "region_upsert",
             RelayMsg::DeleteResource(_) => "resource_delete",
             RelayMsg::DeleteEnemy(_) => "enemy_delete",
@@ -375,6 +397,62 @@ pub struct ClaimOwnerRow {
     pub claim_entity_id: u64,
     /// `claim_state.owner_player_entity_id`; 0 when unknown/unowned.
     pub owner_player_entity_id: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemKind {
+    Item,
+    Cargo,
+}
+
+/// Upstream `ItemStack`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemStackRow {
+    pub item_id: i32,
+    pub quantity: i32,
+    pub kind: ItemKind,
+    pub durability: Option<i32>,
+}
+
+/// One player-set `trade_order_state` row with its shop's claim/nickname joined in.
+#[derive(Debug, Clone)]
+pub struct TradeOrderRow {
+    /// Upstream `trade_order_state.entity_id`.
+    pub id: u64,
+    pub shop_entity_id: u64,
+    pub remaining_stock: i32,
+    pub offer_items: Vec<ItemStackRow>,
+    pub required_items: Vec<ItemStackRow>,
+    pub claim_entity_id: u64,
+    pub region_id: u8,
+    pub shop_name: String,
+}
+
+/// A shop's current claim (0 when none) and nickname (empty when unnamed).
+#[derive(Debug, Clone)]
+pub struct ShopInfoRow {
+    pub shop_entity_id: u64,
+    pub claim_entity_id: u64,
+    pub shop_name: String,
+}
+
+/// One `barter_stall_inventory_event` row. Only `reason = Sale` rows with a
+/// trade order id and amount are ever constructed (see
+/// `TradeEventRow::from_upstream`), so the reason is implicit and the batcher
+/// stamps `Sale`.
+#[derive(Debug, Clone)]
+pub struct TradeEventRow {
+    pub region_id: u8,
+    pub shop_entity_id: u64,
+    pub claim_entity_id: u64,
+    pub actor_entity_id: u64,
+    pub trade_order_entity_id: u64,
+    pub trade_amount: i32,
+    pub added_items: Vec<ItemStackRow>,
+    pub removed_items: Vec<ItemStackRow>,
+    pub treasury_coins_added: i32,
+    pub treasury_coins_removed: i32,
+    pub timestamp_micros: i64,
 }
 
 /// Three upstream region tables (`world_region_name_state`,

@@ -10,14 +10,15 @@
 use super::ProcessorHandle;
 use super::join::{
     ClaimLocalData, ClaimMemberData, EntityLocation, HerdSyncEntry, JoinState,
-    ProgressiveCraftState,
+    ProgressiveCraftState, ShopInfo, TradeOrderData,
 };
 use crate::history::HistoryMsg;
 use crate::relay::{
     ClaimInfoField, ClaimInfoRow, ClaimInfoUpdate, ClaimMemberRow, ClaimMetaRow, ClaimOwnerRow,
     ClaimSupplyRow, CraftContributionDeltaRow, CraftExpiryRow, CraftExpiryStatus,
     CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, PlayerRow,
-    PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow,
+    PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow, ShopInfoRow, TradeEventRow,
+    TradeOrderRow,
 };
 use crate::upstream::{GrowthTimerSubRequest, Phase, RegionUpdate};
 use anyhow::Result;
@@ -169,6 +170,23 @@ pub async fn handle(
                 rows: claim_members,
             });
         }
+        if pipelines.trades {
+            let orders = region.snapshot_trade_orders(region_id);
+            // Sales that landed while subscriptions were still being applied.
+            let events = std::mem::take(&mut region.trade_events);
+            counts.push(format!(
+                "trade_orders={} trade_events={}",
+                orders.len(),
+                events.len()
+            ));
+            relay_msgs.push(RelayMsg::ReplaceTradeOrders {
+                region_id,
+                rows: orders,
+            });
+            if !events.is_empty() {
+                relay_msgs.push(RelayMsg::InsertTradeEvents(events));
+            }
+        }
         // Nothing to replace for regions: the row is keyed by region id and
         // this task owns exactly one, so an upsert is already a full replace.
         // `region_info_dirty` stays false if no region rows ever arrived, in
@@ -267,6 +285,31 @@ fn update_join_maps(region_id: u8, region: &mut super::join::RegionJoinState, up
 
     update_region_info(region_id, region, update);
 
+    // Shop info (building nicknames, deployable claim/nickname). Maintained in
+    // both phases: the live phase joins it onto new trade orders and diffs it to
+    // detect shop renames / claim changes. (Building claims come from
+    // `building_claim_map`, maintained below.)
+    for e in &update.building_nickname_state.deletes {
+        region.building_nicknames.remove(&e.row.entity_id);
+    }
+    for e in &update.building_nickname_state.inserts {
+        region
+            .building_nicknames
+            .insert(e.row.entity_id, e.row.nickname.clone());
+    }
+    for e in &update.deployable_state_v_2.deletes {
+        region.deployable_shops.remove(&e.row.entity_id);
+    }
+    for e in &update.deployable_state_v_2.inserts {
+        region.deployable_shops.insert(
+            e.row.entity_id,
+            ShopInfo {
+                claim_entity_id: e.row.claim_entity_id,
+                nickname: e.row.nickname.clone(),
+            },
+        );
+    }
+
     // resource_desc id → tag. Maintained in both phases: it arrives during the
     // sync phase (GrowthTimers pipeline) but is read in the live phase to
     // classify newly-inserted resources for targeted growth-timer subs.
@@ -335,14 +378,6 @@ fn update_join_maps(region_id: u8, region: &mut super::join::RegionJoinState, up
         for e in &update.waystone_state.inserts {
             region.claim_waystones.insert(e.row.claim_entity_id);
         }
-        for e in &update.user_state.deletes {
-            region.user_identity_map.remove(&e.row.identity);
-        }
-        for e in &update.user_state.inserts {
-            region
-                .user_identity_map
-                .insert(e.row.identity, e.row.entity_id);
-        }
         for e in &update.building_state.deletes {
             region.building_claim_map.remove(&e.row.entity_id);
         }
@@ -379,6 +414,25 @@ fn update_join_maps(region_id: u8, region: &mut super::join::RegionJoinState, up
                 },
             );
         }
+
+        // Trades: orders are cached for the initial snapshot (traveler orders are
+        // skipped). Events have no initial rows, so anything here happened during
+        // sync and is held until the snapshot is emitted.
+        for e in &update.trade_order_state.deletes {
+            region.trade_orders.remove(&e.row.entity_id);
+        }
+        for e in &update.trade_order_state.inserts {
+            if let Some(order) = TradeOrderData::from_row(&e.row) {
+                region.trade_orders.insert(e.row.entity_id, order);
+            }
+        }
+        region.trade_events.extend(
+            update
+                .barter_stall_inventory_event
+                .inserts
+                .iter()
+                .filter_map(|e| TradeEventRow::from_upstream(region_id, &e.row)),
+        );
 
         // Claim local state drives ClaimMeta + ClaimSupply snapshots. Only
         // needed in the sync phase; live-phase rows are derived from the batch.
@@ -478,14 +532,6 @@ fn update_join_maps(region_id: u8, region: &mut super::join::RegionJoinState, up
             );
         }
     } else {
-        for e in &update.user_state.deletes {
-            region.user_identity_map.remove(&e.row.identity);
-        }
-        for e in &update.user_state.inserts {
-            region
-                .user_identity_map
-                .insert(e.row.identity, e.row.entity_id);
-        }
         for e in &update.building_state.deletes {
             region.building_claim_map.remove(&e.row.entity_id);
         }
@@ -633,6 +679,10 @@ fn emit_deltas(
             world_region_name_state,
             world_region_state,
             region_control_info,
+            trade_order_state,
+            barter_stall_inventory_event,
+            building_nickname_state,
+            deployable_state_v_2,
         ]
     );
 
@@ -663,6 +713,10 @@ fn emit_deltas(
     let mut claim_member_upserts: Vec<ClaimMemberRow> = Vec::new();
     let mut claim_member_deletes: Vec<u64> = Vec::new();
     let mut claim_owner_updates: Vec<ClaimOwnerRow> = Vec::new();
+    let mut trade_order_upserts: Vec<TradeOrderRow> = Vec::new();
+    let mut trade_order_deletes: Vec<u64> = Vec::new();
+    let mut shop_info_updates: Vec<ShopInfoRow> = Vec::new();
+    let mut trade_event_inserts: Vec<TradeEventRow> = Vec::new();
     let mut history_msgs: Vec<HistoryMsg> = Vec::new();
 
     // Resource deletes.
@@ -1268,6 +1322,95 @@ fn emit_deltas(
         });
     }
 
+    // Trade orders. A delete+insert pair for the same id is an in-place update
+    // (stock change). Traveler orders are never mirrored, on either side.
+    for e in &update.trade_order_state.deletes {
+        if e.row.traveler_trade_order_id.is_some() {
+            continue;
+        }
+        let replaced =
+            update.trade_order_state.inserts.iter().any(|i| {
+                i.row.entity_id == e.row.entity_id && i.row.traveler_trade_order_id.is_none()
+            });
+        if !replaced {
+            trade_order_deletes.push(e.row.entity_id);
+        }
+    }
+    for e in &update.trade_order_state.inserts {
+        if let Some(order) = TradeOrderData::from_row(&e.row) {
+            let shop = region.shop_info(order.shop_entity_id);
+            trade_order_upserts.push(order.into_row(e.row.entity_id, region_id, shop));
+        }
+    }
+
+    // Shops whose claim or nickname changed. `update_join_maps` has already
+    // folded this batch into the shop maps, so `shop_info` is current. Orders
+    // inserted in this same batch were joined above and the relay reducer skips
+    // no-op rewrites, so overlap is harmless.
+    let mut changed_shops: HashSet<u64> = HashSet::new();
+    for e in &update.building_state.inserts {
+        if let Some(prev) = update
+            .building_state
+            .deletes
+            .iter()
+            .find(|d| d.row.entity_id == e.row.entity_id)
+            && prev.row.claim_entity_id != e.row.claim_entity_id
+        {
+            changed_shops.insert(e.row.entity_id);
+        }
+    }
+    for e in &update.building_nickname_state.deletes {
+        // A delete without a matching insert clears the nickname.
+        if !update
+            .building_nickname_state
+            .inserts
+            .iter()
+            .any(|i| i.row.entity_id == e.row.entity_id)
+        {
+            changed_shops.insert(e.row.entity_id);
+        }
+    }
+    for e in &update.building_nickname_state.inserts {
+        let unchanged = update
+            .building_nickname_state
+            .deletes
+            .iter()
+            .any(|d| d.row.entity_id == e.row.entity_id && d.row.nickname == e.row.nickname);
+        if !unchanged {
+            changed_shops.insert(e.row.entity_id);
+        }
+    }
+    // Brand-new deployables (no same-batch delete) cannot have orders yet.
+    for e in &update.deployable_state_v_2.inserts {
+        if let Some(prev) = update
+            .deployable_state_v_2
+            .deletes
+            .iter()
+            .find(|d| d.row.entity_id == e.row.entity_id)
+            && (prev.row.claim_entity_id != e.row.claim_entity_id
+                || prev.row.nickname != e.row.nickname)
+        {
+            changed_shops.insert(e.row.entity_id);
+        }
+    }
+    for shop_entity_id in changed_shops {
+        let shop = region.shop_info(shop_entity_id);
+        shop_info_updates.push(ShopInfoRow {
+            shop_entity_id,
+            claim_entity_id: shop.claim_entity_id,
+            shop_name: shop.nickname,
+        });
+    }
+
+    // Sales. Upstream event rows arrive as insert/delete pairs; only inserts matter.
+    trade_event_inserts.extend(
+        update
+            .barter_stall_inventory_event
+            .inserts
+            .iter()
+            .filter_map(|e| TradeEventRow::from_upstream(region_id, &e.row)),
+    );
+
     send_relay(
         &sinks.relay_tx,
         resource_deletes.into_iter().map(RelayMsg::DeleteResource),
@@ -1421,6 +1564,30 @@ fn emit_deltas(
         send_relay(
             &sinks.relay_tx,
             std::iter::once(RelayMsg::SetClaimOwners(claim_owner_updates)),
+        );
+    }
+    if !trade_order_upserts.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::UpsertTradeOrders(trade_order_upserts)),
+        );
+    }
+    if !trade_order_deletes.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::DeleteTradeOrders(trade_order_deletes)),
+        );
+    }
+    if !shop_info_updates.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::SetShopInfo(shop_info_updates)),
+        );
+    }
+    if !trade_event_inserts.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::InsertTradeEvents(trade_event_inserts)),
         );
     }
     send_history(&sinks.history_tx, history_msgs.into_iter());

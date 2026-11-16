@@ -53,13 +53,13 @@ pub async fn run_region(
     shutdown: SharedShutdown,
     dump_manual_trigger_tx: Option<broadcast::Sender<()>>,
 ) -> Result<()> {
-    let token = match config.token_for(&region) {
-        Some(t) => t.to_string(),
-        None => {
-            warn!("[{}] no token available; skipping region", region.name);
-            return Ok(());
-        }
-    };
+    let token = config.token_for(&region).map(str::to_string);
+    if token.is_none() {
+        warn!(
+            "[{}] no token available; connecting without one",
+            region.name
+        );
+    }
     let host = if config.upstream.host.is_empty() {
         UPSTREAM_URI.to_string()
     } else {
@@ -140,10 +140,13 @@ pub async fn run_region(
         let connected_flag = connected_this_attempt.clone();
 
         info!("[{}] connecting...", region.name);
-        let built = DbConnection::builder()
+        let mut builder = DbConnection::builder()
             .with_uri(&host)
-            .with_database_name(&region.name)
-            .with_token(Some(&token))
+            .with_database_name(&region.name);
+        if let Some(token) = token.as_deref() {
+            builder = builder.with_token(Some(token));
+        }
+        let built = builder
             .with_channel_and_event(cache_tx.clone())
             .on_connect(move |ctx, _id, _tok| {
                 connected_flag.store(true, Ordering::Relaxed);
@@ -325,7 +328,7 @@ fn subscribe_growth_timers(con: &DbConnection, region: &str, entity_ids: Vec<u64
 async fn run_dump_schedule(
     host: String,
     module_name: String,
-    token: String,
+    token: Option<String>,
     cfg: DumpScheduleConfig,
     dump_tx: Sender<DumpMsg>,
     shutdown: SharedShutdown,
@@ -432,10 +435,13 @@ async fn run_dump_schedule(
         let tables_for_connect = cfg.tables.clone();
         let module_for_log = module_name.clone();
 
-        let built = DbConnection::builder()
+        let mut builder = DbConnection::builder()
             .with_uri(&host)
-            .with_database_name(&module_name)
-            .with_token(Some(&token))
+            .with_database_name(&module_name);
+        if let Some(token) = token.as_deref() {
+            builder = builder.with_token(Some(token));
+        }
+        let built = builder
             .with_channel(cache_tx.clone())
             .on_connect(move |ctx, _id, _tok| {
                 info!(
