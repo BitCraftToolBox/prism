@@ -1,5 +1,7 @@
 use crate::reducers::ensure_relay;
-use crate::tables::trades::{TradeEvent, TradeOrder, trade_event, trade_order};
+use crate::tables::trades::{
+    TradeEvent, TradeOrder, trade_event, trade_event_history, trade_order,
+};
 use spacetimedb::{ReducerContext, ScheduleAt, SpacetimeType, Table, TimeDuration, reducer, table};
 
 #[table(accessor = expiring_trade_events, scheduled(remove_trade_event))]
@@ -98,9 +100,10 @@ fn remove_trade_event(
     ctx: &ReducerContext,
     expiring_event: ExpiringTradeEvent,
 ) -> Result<(), String> {
-    ctx.db
-        .trade_event()
-        .id()
-        .delete(expiring_event.event_id);
+    // Move the expired row into the history table instead of deleting it.
+    if let Some(row) = ctx.db.trade_event().id().find(expiring_event.event_id) {
+        ctx.db.trade_event().id().delete(expiring_event.event_id);
+        ctx.db.trade_event_history().insert(row);
+    }
     Ok(())
 }

@@ -87,6 +87,7 @@ pub mod set_players_online_reducer;
 pub mod set_shop_info_reducer;
 pub mod shop_info_update_type;
 pub mod toggle_public_reducer;
+pub mod trade_event_history_table;
 pub mod trade_event_table;
 pub mod trade_event_type;
 pub mod trade_order_table;
@@ -185,6 +186,7 @@ pub use set_players_online_reducer::set_players_online;
 pub use set_shop_info_reducer::set_shop_info;
 pub use shop_info_update_type::ShopInfoUpdate;
 pub use toggle_public_reducer::toggle_public;
+pub use trade_event_history_table::*;
 pub use trade_event_table::*;
 pub use trade_event_type::TradeEvent;
 pub use trade_order_table::*;
@@ -695,6 +697,7 @@ pub struct DbUpdate {
     region: __sdk::TableUpdate<Region>,
     resource_location: __sdk::TableUpdate<ResourceLocation>,
     trade_event: __sdk::TableUpdate<TradeEvent>,
+    trade_event_history: __sdk::TableUpdate<TradeEvent>,
     trade_order: __sdk::TableUpdate<TradeOrder>,
 }
 
@@ -752,6 +755,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "trade_event" => db_update
                     .trade_event
                     .append(trade_event_table::parse_table_update(table_update)?),
+                "trade_event_history" => db_update
+                    .trade_event_history
+                    .append(trade_event_history_table::parse_table_update(table_update)?),
                 "trade_order" => db_update
                     .trade_order
                     .append(trade_order_table::parse_table_update(table_update)?),
@@ -832,6 +838,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.trade_event = cache
             .apply_diff_to_table::<TradeEvent>("trade_event", &self.trade_event)
             .with_updates_by_pk(|row| &row.id);
+        diff.trade_event_history = cache
+            .apply_diff_to_table::<TradeEvent>("trade_event_history", &self.trade_event_history)
+            .with_updates_by_pk(|row| &row.id);
         diff.trade_order = cache
             .apply_diff_to_table::<TradeOrder>("trade_order", &self.trade_order)
             .with_updates_by_pk(|row| &row.id);
@@ -889,6 +898,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "trade_event" => db_update
                     .trade_event
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "trade_event_history" => db_update
+                    .trade_event_history
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "trade_order" => db_update
                     .trade_order
@@ -954,6 +966,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "trade_event" => db_update
                     .trade_event
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "trade_event_history" => db_update
+                    .trade_event_history
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "trade_order" => db_update
                     .trade_order
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -988,6 +1003,7 @@ pub struct AppliedDiff<'r> {
     region: __sdk::TableAppliedDiff<'r, Region>,
     resource_location: __sdk::TableAppliedDiff<'r, ResourceLocation>,
     trade_event: __sdk::TableAppliedDiff<'r, TradeEvent>,
+    trade_event_history: __sdk::TableAppliedDiff<'r, TradeEvent>,
     trade_order: __sdk::TableAppliedDiff<'r, TradeOrder>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
@@ -1058,6 +1074,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<TradeEvent>("trade_event", &self.trade_event, event);
+        callbacks.invoke_table_row_callbacks::<TradeEvent>(
+            "trade_event_history",
+            &self.trade_event_history,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<TradeOrder>("trade_order", &self.trade_order, event);
     }
 }
@@ -1735,6 +1756,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         region_table::register_table(client_cache);
         resource_location_table::register_table(client_cache);
         trade_event_table::register_table(client_cache);
+        trade_event_history_table::register_table(client_cache);
         trade_order_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
@@ -1754,6 +1776,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "region",
         "resource_location",
         "trade_event",
+        "trade_event_history",
         "trade_order",
     ];
 }

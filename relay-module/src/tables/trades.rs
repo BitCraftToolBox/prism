@@ -48,9 +48,14 @@ pub struct TradeOrder {
 }
 
 /// A completed sale, mirrored from the upstream `barter_stall_inventory_event`
-/// event table. Upstream rows are ephemeral; here they persist for 24h (see
-/// `remove_trade_event`) so clients can read recent trade history.
+/// event table. Upstream rows are ephemeral; here they persist for 24h in
+/// `trade_event` (see `remove_trade_event`), after which they are moved to
+/// `trade_event_history` (same schema and ids).
 #[table(accessor = trade_event, public,
+    index(accessor = by_region, btree(columns = [region_id])),
+    index(accessor = by_shop, btree(columns = [shop_entity_id])),
+)]
+#[table(accessor = trade_event_history, public,
     index(accessor = by_region, btree(columns = [region_id])),
     index(accessor = by_shop, btree(columns = [shop_entity_id])),
 )]
