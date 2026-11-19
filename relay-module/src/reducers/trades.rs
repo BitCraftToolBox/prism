@@ -102,6 +102,19 @@ fn remove_trade_event(
     ctx: &ReducerContext,
     expiring_event: ExpiringTradeEvent,
 ) -> Result<(), String> {
+    // Events inserted before history moved to insert time were never written
+    // there; backfill them now so they aren't lost when the row expires.
+    if let Some(event) = ctx.db.trade_event().id().find(expiring_event.event_id) {
+        if ctx
+            .db
+            .trade_event_history()
+            .id()
+            .find(event.id)
+            .is_none()
+        {
+            ctx.db.trade_event_history().insert(event);
+        }
+    }
     ctx.db.trade_event().id().delete(expiring_event.event_id);
     Ok(())
 }
