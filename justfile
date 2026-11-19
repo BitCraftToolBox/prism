@@ -28,7 +28,7 @@ generate-map-bindings path="../bitcraftmap/src/relay-bindings":
 
 # Regen bindings for brico
 generate-brico-bindings path="../brico/common/bindings/prism":
-    spacetime version use 2.10.0
+    spacetime version use 2.14.0
     spacetime generate -y --lang ts --out-dir {{path}} --module-path relay-module
 
 # --- prism workspace ---

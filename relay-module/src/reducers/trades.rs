@@ -86,6 +86,8 @@ pub fn insert_trade_events(ctx: &ReducerContext, rows: Vec<TradeEvent>) -> Resul
     let after_24h = TimeDuration::from_micros(24 * 60 * 60 * 1_000_000);
     for row in rows {
         let inserted = ctx.db.trade_event().insert(row);
+        // History is the full log: write it now (same id) rather than at expiry.
+        ctx.db.trade_event_history().insert(inserted.clone());
         let scheduled_at: ScheduleAt = (ctx.timestamp + after_24h).into();
         ctx.db.expiring_trade_events().insert(ExpiringTradeEvent {
             event_id: inserted.id,
@@ -100,10 +102,6 @@ fn remove_trade_event(
     ctx: &ReducerContext,
     expiring_event: ExpiringTradeEvent,
 ) -> Result<(), String> {
-    // Move the expired row into the history table instead of deleting it.
-    if let Some(row) = ctx.db.trade_event().id().find(expiring_event.event_id) {
-        ctx.db.trade_event().id().delete(expiring_event.event_id);
-        ctx.db.trade_event_history().insert(row);
-    }
+    ctx.db.trade_event().id().delete(expiring_event.event_id);
     Ok(())
 }
