@@ -5,6 +5,7 @@
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 use super::item_stack_type::ItemStack;
+use super::shop_type_type::ShopType;
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
@@ -17,6 +18,8 @@ pub struct TradeOrder {
     pub claim_entity_id: u64,
     pub region_id: u8,
     pub shop_name: String,
+    pub player_owner_id: u64,
+    pub shop_type: ShopType,
 }
 
 impl __sdk::InModule for TradeOrder {
@@ -35,6 +38,8 @@ pub struct TradeOrderCols {
     pub claim_entity_id: __sdk::__query_builder::Col<TradeOrder, u64>,
     pub region_id: __sdk::__query_builder::Col<TradeOrder, u8>,
     pub shop_name: __sdk::__query_builder::Col<TradeOrder, String>,
+    pub player_owner_id: __sdk::__query_builder::Col<TradeOrder, u64>,
+    pub shop_type: __sdk::__query_builder::Col<TradeOrder, ShopType>,
 }
 
 impl __sdk::__query_builder::HasCols for TradeOrder {
@@ -49,6 +54,8 @@ impl __sdk::__query_builder::HasCols for TradeOrder {
             claim_entity_id: __sdk::__query_builder::Col::new(table_name, "claim_entity_id"),
             region_id: __sdk::__query_builder::Col::new(table_name, "region_id"),
             shop_name: __sdk::__query_builder::Col::new(table_name, "shop_name"),
+            player_owner_id: __sdk::__query_builder::Col::new(table_name, "player_owner_id"),
+            shop_type: __sdk::__query_builder::Col::new(table_name, "shop_type"),
         }
     }
 }

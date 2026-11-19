@@ -27,7 +27,7 @@ use relay_bindings::{
     ClaimOwnerUpdate as BindingsClaimOwnerUpdate, ClaimSupply, CraftContributionDelta, CraftExpiry,
     CraftPublicUpdate, CraftStatus, CraftUpdate, EnemyLocation, GrowthTimerUpdate, HerdLocation,
     ItemStack, ItemType, MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate, PlayerState,
-    RecipeMeta, Region as BindingsRegion, ResourceLocation, ShopInfoUpdate, TradeEvent, TradeOrder,
+    RecipeMeta, Region as BindingsRegion, ResourceLocation, ShopInfoUpdate, ShopType, TradeEvent, TradeOrder,
 };
 use relay_sdk::Timestamp;
 use tokio::sync::mpsc::Receiver;
@@ -39,7 +39,7 @@ use super::{
     ClaimSupplyRow, CraftContributionDeltaRow, CraftExpiryRow, CraftExpiryStatus,
     CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, ItemKind,
     ItemStackRow, MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow, RecipeMetaRow,
-    RegionRow, RelayMsg, ResourceRow, ShopInfoRow, TradeEventRow, TradeOrderRow,
+    RegionRow, RelayMsg, ResourceRow, ShopInfoRow, ShopKind, TradeEventRow, TradeOrderRow,
 };
 use crate::config::{Config, RelayConfig};
 use crate::shutdown::SharedShutdown;
@@ -312,6 +312,12 @@ fn to_trade_order(r: &TradeOrderRow) -> TradeOrder {
         claim_entity_id: r.claim_entity_id,
         region_id: r.region_id,
         shop_name: r.shop_name.clone(),
+        player_owner_id: r.player_owner_id,
+        shop_type: match r.shop_type {
+            ShopKind::BarterStall(id) => ShopType::BarterStall(id),
+            ShopKind::TraderStand(id) => ShopType::TraderStand(id),
+            ShopKind::Unknown => ShopType::Unknown(0),
+        },
     }
 }
 fn to_shop_info_update(r: &ShopInfoRow) -> ShopInfoUpdate {

@@ -9,7 +9,7 @@
 use crate::relay::{
     ClaimInfoRow, ClaimMemberRow, ClaimMetaRow, ClaimSupplyRow, CraftUpdateRow, EnemyRow,
     GrowthTimerRow, HerdRow, ItemKind, ItemStackRow, PlayerRow, PlayerStateRow, RecipeMetaRow,
-    RegionRow, ResourceRow, TradeEventRow, TradeOrderRow,
+    RegionRow, ResourceRow, ShopKind, TradeEventRow, TradeOrderRow,
 };
 use hashbrown::{HashMap, HashSet};
 use upstream_bindings::region::{
@@ -58,6 +58,9 @@ pub struct RegionJoinState {
     pub is_live: bool,
     /// building_entity_id -> claim_entity_id (maintained in both sync and live phases).
     pub building_claim_map: HashMap<u64, u64>,
+    /// building_entity_id -> building_description_id (maintained alongside
+    /// `building_claim_map`); used to type the shop of a trade order.
+    pub building_desc_ids: HashMap<u64, i32>,
     /// recipe_id -> actions_required (sync-phase cache).
     pub recipe_map: HashMap<i32, CraftingRecipeDesc>,
     /// entity ids currently in `public_progressive_action_state` (sync-phase cache).
@@ -166,11 +169,14 @@ impl ClaimMemberData {
     }
 }
 
-/// A shop's claim (0 when none) and nickname (empty when unnamed).
+/// A shop's claim (0 when none), nickname (empty when unnamed), owning player
+/// (`deployable_state_v2.owner_id`; 0 for buildings) and kind.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShopInfo {
     pub claim_entity_id: u64,
     pub nickname: String,
+    pub owner_id: u64,
+    pub kind: ShopKind,
 }
 
 /// The subset of a player-set `trade_order_state` row mirrored into the relay.
@@ -207,6 +213,8 @@ impl TradeOrderData {
             claim_entity_id: shop.claim_entity_id,
             region_id,
             shop_name: shop.nickname,
+            player_owner_id: shop.owner_id,
+            shop_type: shop.kind,
         }
     }
 }
@@ -425,8 +433,9 @@ impl RegionJoinState {
             .collect()
     }
 
-    /// Claim/nickname for a shop, which is either a deployable or a building.
-    /// Unknown shops resolve to no claim and no name.
+    /// Claim/nickname/owner/kind for a shop, which is either a deployable or a
+    /// building. Unknown shops resolve to no claim, name or owner, and
+    /// `ShopKind::Unknown`.
     pub fn shop_info(&self, shop_entity_id: u64) -> ShopInfo {
         if let Some(info) = self.deployable_shops.get(&shop_entity_id) {
             return info.clone();
@@ -442,6 +451,11 @@ impl RegionJoinState {
                 .get(&shop_entity_id)
                 .cloned()
                 .unwrap_or_default(),
+            owner_id: 0,
+            kind: self
+                .building_desc_ids
+                .get(&shop_entity_id)
+                .map_or(ShopKind::Unknown, |&id| ShopKind::BarterStall(id)),
         }
     }
 

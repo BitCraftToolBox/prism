@@ -17,7 +17,7 @@ use crate::relay::{
     ClaimInfoField, ClaimInfoRow, ClaimInfoUpdate, ClaimMemberRow, ClaimMetaRow, ClaimOwnerRow,
     ClaimSupplyRow, CraftContributionDeltaRow, CraftExpiryRow, CraftExpiryStatus,
     CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, PlayerRow,
-    PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow, ShopInfoRow, TradeEventRow,
+    PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow, ShopInfoRow, ShopKind, TradeEventRow,
     TradeOrderRow,
 };
 use crate::upstream::{GrowthTimerSubRequest, Phase, RegionUpdate};
@@ -306,6 +306,8 @@ fn update_join_maps(region_id: u8, region: &mut super::join::RegionJoinState, up
             ShopInfo {
                 claim_entity_id: e.row.claim_entity_id,
                 nickname: e.row.nickname.clone(),
+                owner_id: e.row.owner_id,
+                kind: ShopKind::TraderStand(e.row.deployable_description_id),
             },
         );
     }
@@ -380,11 +382,15 @@ fn update_join_maps(region_id: u8, region: &mut super::join::RegionJoinState, up
         }
         for e in &update.building_state.deletes {
             region.building_claim_map.remove(&e.row.entity_id);
+            region.building_desc_ids.remove(&e.row.entity_id);
         }
         for e in &update.building_state.inserts {
             region
                 .building_claim_map
                 .insert(e.row.entity_id, e.row.claim_entity_id);
+            region
+                .building_desc_ids
+                .insert(e.row.entity_id, e.row.building_description_id);
         }
         for e in &update.crafting_recipe_desc.deletes {
             region.recipe_map.remove(&e.row.id);
@@ -534,11 +540,15 @@ fn update_join_maps(region_id: u8, region: &mut super::join::RegionJoinState, up
     } else {
         for e in &update.building_state.deletes {
             region.building_claim_map.remove(&e.row.entity_id);
+            region.building_desc_ids.remove(&e.row.entity_id);
         }
         for e in &update.building_state.inserts {
             region
                 .building_claim_map
                 .insert(e.row.entity_id, e.row.claim_entity_id);
+            region
+                .building_desc_ids
+                .insert(e.row.entity_id, e.row.building_description_id);
         }
 
         // Live phase: only maintain player_entity_ids for history routing.

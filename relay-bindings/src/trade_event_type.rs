@@ -82,6 +82,7 @@ impl __sdk::__query_builder::HasCols for TradeEvent {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct TradeEventIxCols {
+    pub claim_entity_id: __sdk::__query_builder::IxCol<TradeEvent, u64>,
     pub id: __sdk::__query_builder::IxCol<TradeEvent, u64>,
     pub region_id: __sdk::__query_builder::IxCol<TradeEvent, u8>,
     pub shop_entity_id: __sdk::__query_builder::IxCol<TradeEvent, u64>,
@@ -91,6 +92,7 @@ impl __sdk::__query_builder::HasIxCols for TradeEvent {
     type IxCols = TradeEventIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         TradeEventIxCols {
+            claim_entity_id: __sdk::__query_builder::IxCol::new(table_name, "claim_entity_id"),
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
             region_id: __sdk::__query_builder::IxCol::new(table_name, "region_id"),
             shop_entity_id: __sdk::__query_builder::IxCol::new(table_name, "shop_entity_id"),

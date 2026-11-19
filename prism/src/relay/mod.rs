@@ -426,6 +426,18 @@ pub struct TradeOrderRow {
     pub claim_entity_id: u64,
     pub region_id: u8,
     pub shop_name: String,
+    pub player_owner_id: u64,
+    pub shop_type: ShopKind,
+}
+
+/// Which kind of shop holds an order, with its upstream description id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShopKind {
+    /// `building_state.building_description_id`
+    BarterStall(i32),
+    /// `deployable_state_v2.deployable_description_id`
+    TraderStand(i32),
+    Unknown,
 }
 
 /// A shop's current claim (0 when none) and nickname (empty when unnamed).
