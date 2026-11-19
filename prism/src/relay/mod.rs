@@ -82,6 +82,18 @@ pub enum RelayMsg {
         region_id: u8,
         rows: Vec<TradeOrderRow>,
     },
+    /// Snapshot-phase payload: full replacement of `shop_info` for a region.
+    /// Always sent, even when empty, so stale rows get wiped.
+    ReplaceShopInfo {
+        region_id: u8,
+        rows: Vec<ShopInfoRow>,
+    },
+    /// Snapshot-phase payload: full replacement of `shop_inventory` for a
+    /// region. Always sent, even when empty, so stale rows get wiped.
+    ReplaceShopInventories {
+        region_id: u8,
+        rows: Vec<ShopInventoryRow>,
+    },
 
     InsertResource(ResourceRow),
     InsertGrowthTimer(GrowthTimerRow),
@@ -126,9 +138,19 @@ pub enum RelayMsg {
     UpsertTradeOrders(Vec<TradeOrderRow>),
     /// Live-phase delta: trade orders removed upstream.
     DeleteTradeOrders(Vec<u64>),
-    /// Live-phase delta: a shop's claim/nickname changed; the relay module
-    /// updates every order in that shop.
-    SetShopInfo(Vec<ShopInfoRow>),
+    /// Live-phase delta: a shop's claim changed; the relay module updates
+    /// every order in that shop.
+    SetShopClaims(Vec<ShopClaimRow>),
+    /// Live-phase delta: shops placed/stowed/destroyed; the relay module
+    /// re-flags every order in that shop.
+    SetShopActive(Vec<ShopActiveRow>),
+    /// Live-phase delta: whole `shop_info` rows for shops placed/built or whose
+    /// metadata changed.
+    UpsertShopInfo(Vec<ShopInfoRow>),
+    /// Live-phase delta: shops stowed or destroyed.
+    DeleteShopInfo(Vec<u64>),
+    /// Live-phase delta: one half (items or cargo) of a shop's inventory each.
+    UpdateShopInventories(Vec<ShopInventoryUpdateRow>),
     /// Completed sales (both the sync-phase backlog and live-phase rows). The
     /// relay module keeps these for 24h.
     InsertTradeEvents(Vec<TradeEventRow>),
@@ -167,6 +189,8 @@ impl RelayMsg {
             RelayMsg::ReplaceClaims { .. } => "claim_replace",
             RelayMsg::ReplaceClaimMembers { .. } => "claim_member_replace",
             RelayMsg::ReplaceTradeOrders { .. } => "trade_order_replace",
+            RelayMsg::ReplaceShopInfo { .. } => "shop_info_replace",
+            RelayMsg::ReplaceShopInventories { .. } => "shop_inventory_replace",
             RelayMsg::InsertResource(_) => "resource_insert",
             RelayMsg::InsertGrowthTimer(_) => "growth_timer_insert",
             RelayMsg::InsertEnemy(_) => "enemy_insert",
@@ -189,7 +213,11 @@ impl RelayMsg {
             RelayMsg::SetClaimOwners(_) => "claim_owner_set",
             RelayMsg::UpsertTradeOrders(_) => "trade_order_upsert",
             RelayMsg::DeleteTradeOrders(_) => "trade_order_delete",
-            RelayMsg::SetShopInfo(_) => "shop_info_set",
+            RelayMsg::SetShopClaims(_) => "shop_claim_set",
+            RelayMsg::SetShopActive(_) => "shop_active_set",
+            RelayMsg::UpsertShopInfo(_) => "shop_info_upsert",
+            RelayMsg::DeleteShopInfo(_) => "shop_info_delete",
+            RelayMsg::UpdateShopInventories(_) => "shop_inventory_update",
             RelayMsg::InsertTradeEvents(_) => "trade_event_insert",
             RelayMsg::UpsertRegions(_) => "region_upsert",
             RelayMsg::DeleteResource(_) => "resource_delete",
@@ -414,7 +442,8 @@ pub struct ItemStackRow {
     pub durability: Option<i32>,
 }
 
-/// One player-set `trade_order_state` row with its shop's claim/nickname joined in.
+/// One player-set `trade_order_state` row with its shop's claim joined in. The
+/// relay's `shop_name` column is left empty (see `ShopInfoRow`).
 #[derive(Debug, Clone)]
 pub struct TradeOrderRow {
     /// Upstream `trade_order_state.entity_id`.
@@ -425,12 +454,11 @@ pub struct TradeOrderRow {
     pub required_items: Vec<ItemStackRow>,
     pub claim_entity_id: u64,
     pub region_id: u8,
-    pub shop_name: String,
-    pub player_owner_id: u64,
-    pub shop_type: ShopKind,
+    /// The shop is in the world (has a `barter_stall_state` row).
+    pub active: bool,
 }
 
-/// Which kind of shop holds an order, with its upstream description id.
+/// Which kind of shop a `shop_info` row is, with its upstream description id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShopKind {
     /// `building_state.building_description_id`
@@ -440,12 +468,65 @@ pub enum ShopKind {
     Unknown,
 }
 
-/// A shop's current claim (0 when none) and nickname (empty when unnamed).
+/// A shop's current claim (0 when none), applied to all of its trade orders.
+#[derive(Debug, Clone)]
+pub struct ShopClaimRow {
+    pub shop_entity_id: u64,
+    pub claim_entity_id: u64,
+}
+
+/// Upstream `Pocket`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PocketRow {
+    pub volume: i32,
+    pub contents: Option<ItemStackRow>,
+    pub locked: bool,
+}
+
+/// One relay `shop_info` row: a shop in the world (`barter_stall_state`) and
+/// its metadata.
 #[derive(Debug, Clone)]
 pub struct ShopInfoRow {
     pub shop_entity_id: u64,
+    pub region_id: u8,
     pub claim_entity_id: u64,
     pub shop_name: String,
+    /// `deployable_state_v2.owner_id`; 0 for buildings / unknown shops.
+    pub player_owner_id: u64,
+    pub shop_type: ShopKind,
+}
+
+/// Whether a shop's orders are tradeable (the shop is in the world).
+#[derive(Debug, Clone)]
+pub struct ShopActiveRow {
+    pub shop_entity_id: u64,
+    pub active: bool,
+}
+
+/// One relay `shop_inventory` row: all of a shop's storage as one inventory,
+/// item pockets before `cargo_index`, cargo pockets after.
+#[derive(Debug, Clone)]
+pub struct ShopInventoryRow {
+    pub shop_entity_id: u64,
+    pub region_id: u8,
+    pub pockets: Vec<PocketRow>,
+    pub cargo_index: u32,
+}
+
+/// Which half of a `shop_inventory` row an update replaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InventoryPartKind {
+    Items,
+    Cargo,
+}
+
+/// Replace one half of a shop's inventory; empty `pockets` clears it.
+#[derive(Debug, Clone)]
+pub struct ShopInventoryUpdateRow {
+    pub shop_entity_id: u64,
+    pub region_id: u8,
+    pub part: InventoryPartKind,
+    pub pockets: Vec<PocketRow>,
 }
 
 /// One `barter_stall_inventory_event` row. Only `reason = Sale` rows with a

@@ -4,50 +4,50 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
-use super::shop_info_update_type::ShopInfoUpdate;
+use super::shop_active_update_type::ShopActiveUpdate;
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub(super) struct SetShopInfoArgs {
-    pub updates: Vec<ShopInfoUpdate>,
+pub(super) struct SetShopActiveArgs {
+    pub updates: Vec<ShopActiveUpdate>,
 }
 
-impl From<SetShopInfoArgs> for super::Reducer {
-    fn from(args: SetShopInfoArgs) -> Self {
-        Self::SetShopInfo {
+impl From<SetShopActiveArgs> for super::Reducer {
+    fn from(args: SetShopActiveArgs) -> Self {
+        Self::SetShopActive {
             updates: args.updates,
         }
     }
 }
 
-impl __sdk::InModule for SetShopInfoArgs {
+impl __sdk::InModule for SetShopActiveArgs {
     type Module = super::RemoteModule;
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `set_shop_info`.
+/// Extension trait for access to the reducer `set_shop_active`.
 ///
 /// Implemented for [`super::RemoteReducers`].
-pub trait set_shop_info {
-    /// Request that the remote module invoke the reducer `set_shop_info` to run as soon as possible.
+pub trait set_shop_active {
+    /// Request that the remote module invoke the reducer `set_shop_active` to run as soon as possible.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`set_shop_info:set_shop_info_then`] to run a callback after the reducer completes.
-    fn set_shop_info(&self, updates: Vec<ShopInfoUpdate>) -> __sdk::Result<()> {
-        self.set_shop_info_then(updates, |_, _| {})
+    /// /// Use [`set_shop_active:set_shop_active_then`] to run a callback after the reducer completes.
+    fn set_shop_active(&self, updates: Vec<ShopActiveUpdate>) -> __sdk::Result<()> {
+        self.set_shop_active_then(updates, |_, _| {})
     }
 
-    /// Request that the remote module invoke the reducer `set_shop_info` to run as soon as possible,
+    /// Request that the remote module invoke the reducer `set_shop_active` to run as soon as possible,
     /// registering `callback` to run when we are notified that the reducer completed.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and its status can be observed with the `callback`.
-    fn set_shop_info_then(
+    fn set_shop_active_then(
         &self,
-        updates: Vec<ShopInfoUpdate>,
+        updates: Vec<ShopActiveUpdate>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -55,16 +55,16 @@ pub trait set_shop_info {
     ) -> __sdk::Result<()>;
 }
 
-impl set_shop_info for super::RemoteReducers {
-    fn set_shop_info_then(
+impl set_shop_active for super::RemoteReducers {
+    fn set_shop_active_then(
         &self,
-        updates: Vec<ShopInfoUpdate>,
+        updates: Vec<ShopActiveUpdate>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp
-            .invoke_reducer_with_callback(SetShopInfoArgs { updates }, callback)
+            .invoke_reducer_with_callback(SetShopActiveArgs { updates }, callback)
     }
 }

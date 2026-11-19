@@ -53,11 +53,20 @@ pub enum Pipeline {
     /// region.
     Regions,
     /// `trade_order_state` + `barter_stall_inventory_event` (completed sales,
-    /// an upstream event table), joined with `building_state` (claim),
-    /// `building_nickname_state` and `deployable_state_v2` (claim + nickname)
-    /// for each order's shop. Feeds the relay `trade_order` and `trade_event`
+    /// an upstream event table), joined with `building_state` (claim, kind),
+    /// `building_nickname_state` and `deployable_state_v2` (claim, nickname,
+    /// owner, kind) for each order's shop, plus `barter_stall_state` (one row
+    /// per shop in the world: stall buildings and placed trader stands; stowed
+    /// stands have none) and those shops' `inventory_state` rows. Feeds the
+    /// relay `trade_order`, `shop_info`, `shop_inventory` and `trade_event`
     /// tables. `building_state` duplicates the Crafts subscription; identical
     /// queries are deduped server-side.
+    ///
+    /// `inventory_state` is large and hot, so it is joined server-side on
+    /// `barter_stall_state` (both join columns indexed) and only shop
+    /// inventories are delivered. The join side has one row per shop, so each
+    /// inventory arrives once; joining on `trade_order_state` instead would
+    /// deliver (and re-deliver on every change) one copy per order.
     Trades,
 }
 
@@ -123,6 +132,10 @@ impl Pipeline {
                 "SELECT * FROM building_nickname_state;".into(),
                 "SELECT * FROM deployable_state_v2;".into(),
                 "SELECT * FROM trade_order_state;".into(),
+                "SELECT * FROM barter_stall_state;".into(),
+                "SELECT inv.* FROM inventory_state inv \
+                 JOIN barter_stall_state b ON inv.owner_entity_id = b.entity_id;"
+                    .into(),
                 "SELECT * FROM barter_stall_inventory_event;".into(),
             ],
         }

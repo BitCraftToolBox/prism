@@ -10,22 +10,22 @@
 use super::ProcessorHandle;
 use super::join::{
     ClaimLocalData, ClaimMemberData, EntityLocation, HerdSyncEntry, JoinState,
-    ProgressiveCraftState, ShopInfo, TradeOrderData,
+    ProgressiveCraftState, ShopInventory, ShopMeta, TradeOrderData, inventory_halves, pocket_row,
 };
 use crate::history::HistoryMsg;
 use crate::relay::{
     ClaimInfoField, ClaimInfoRow, ClaimInfoUpdate, ClaimMemberRow, ClaimMetaRow, ClaimOwnerRow,
     ClaimSupplyRow, CraftContributionDeltaRow, CraftExpiryRow, CraftExpiryStatus,
     CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, PlayerRow,
-    PlayerStateRow, RecipeMetaRow, RelayMsg, ResourceRow, ShopInfoRow, ShopKind, TradeEventRow,
-    TradeOrderRow,
+    PlayerStateRow, PocketRow, RecipeMetaRow, RelayMsg, ResourceRow, ShopActiveRow, ShopClaimRow,
+    ShopInfoRow, ShopInventoryUpdateRow, ShopKind, TradeEventRow, TradeOrderRow,
 };
 use crate::upstream::{GrowthTimerSubRequest, Phase, RegionUpdate};
 use anyhow::Result;
 use log::{debug, info, warn};
 use metrics::counter;
 use std::collections::{HashMap, HashSet};
-use upstream_bindings::region::DbUpdate;
+use upstream_bindings::region::{DbUpdate, InventoryState};
 use upstream_bindings::sdk::Timestamp;
 
 const OVERWORLD_DIM: u32 = 1;
@@ -183,6 +183,21 @@ pub async fn handle(
                 region_id,
                 rows: orders,
             });
+            let shops = region.snapshot_shop_info(region_id);
+            let inventories = region.snapshot_shop_inventories(region_id);
+            counts.push(format!(
+                "shop_info={} shop_inventories={}",
+                shops.len(),
+                inventories.len()
+            ));
+            relay_msgs.push(RelayMsg::ReplaceShopInfo {
+                region_id,
+                rows: shops,
+            });
+            relay_msgs.push(RelayMsg::ReplaceShopInventories {
+                region_id,
+                rows: inventories,
+            });
             if !events.is_empty() {
                 relay_msgs.push(RelayMsg::InsertTradeEvents(events));
             }
@@ -303,13 +318,22 @@ fn update_join_maps(region_id: u8, region: &mut super::join::RegionJoinState, up
     for e in &update.deployable_state_v_2.inserts {
         region.deployable_shops.insert(
             e.row.entity_id,
-            ShopInfo {
+            ShopMeta {
                 claim_entity_id: e.row.claim_entity_id,
                 nickname: e.row.nickname.clone(),
                 owner_id: e.row.owner_id,
                 kind: ShopKind::TraderStand(e.row.deployable_description_id),
             },
         );
+    }
+
+    // Shops in the world (`barter_stall_state`). Maintained in both phases: the
+    // live phase flags new orders from it and gates shop_info rows on it.
+    for e in &update.barter_stall_state.deletes {
+        region.barter_stalls.remove(&e.row.entity_id);
+    }
+    for e in &update.barter_stall_state.inserts {
+        region.barter_stalls.insert(e.row.entity_id);
     }
 
     // resource_desc id → tag. Maintained in both phases: it arrives during the
@@ -419,6 +443,16 @@ fn update_join_maps(region_id: u8, region: &mut super::join::RegionJoinState, up
                     owner_entity_id: e.row.owner_entity_id,
                 },
             );
+        }
+
+        // Shop inventories are cached for the initial combined snapshot.
+        for e in &update.inventory_state.deletes {
+            region.shop_inventories.remove(&e.row.entity_id);
+        }
+        for e in &update.inventory_state.inserts {
+            region
+                .shop_inventories
+                .insert(e.row.entity_id, ShopInventory::from_row(&e.row));
         }
 
         // Trades: orders are cached for the initial snapshot (traveler orders are
@@ -693,6 +727,8 @@ fn emit_deltas(
             barter_stall_inventory_event,
             building_nickname_state,
             deployable_state_v_2,
+            inventory_state,
+            barter_stall_state,
         ]
     );
 
@@ -725,7 +761,11 @@ fn emit_deltas(
     let mut claim_owner_updates: Vec<ClaimOwnerRow> = Vec::new();
     let mut trade_order_upserts: Vec<TradeOrderRow> = Vec::new();
     let mut trade_order_deletes: Vec<u64> = Vec::new();
-    let mut shop_info_updates: Vec<ShopInfoRow> = Vec::new();
+    let mut shop_claim_updates: Vec<ShopClaimRow> = Vec::new();
+    let mut shop_info_upserts: Vec<ShopInfoRow> = Vec::new();
+    let mut shop_info_deletes: Vec<u64> = Vec::new();
+    let mut shop_active_updates: Vec<ShopActiveRow> = Vec::new();
+    let mut shop_inventory_updates: Vec<ShopInventoryUpdateRow> = Vec::new();
     let mut trade_event_inserts: Vec<TradeEventRow> = Vec::new();
     let mut history_msgs: Vec<HistoryMsg> = Vec::new();
 
@@ -1348,25 +1388,51 @@ fn emit_deltas(
     }
     for e in &update.trade_order_state.inserts {
         if let Some(order) = TradeOrderData::from_row(&e.row) {
-            let shop = region.shop_info(order.shop_entity_id);
-            trade_order_upserts.push(order.into_row(e.row.entity_id, region_id, shop));
+            let claim = region.shop_meta(order.shop_entity_id).claim_entity_id;
+            let active = region.barter_stalls.contains(&order.shop_entity_id);
+            trade_order_upserts.push(order.into_row(e.row.entity_id, region_id, claim, active));
         }
     }
 
-    // Shops whose claim or nickname changed. `update_join_maps` has already
-    // folded this batch into the shop maps, so `shop_info` is current. Orders
-    // inserted in this same batch were joined above and the relay reducer skips
-    // no-op rewrites, so overlap is harmless.
-    let mut changed_shops: HashSet<u64> = HashSet::new();
+    // Shop changes. `update_join_maps` has already folded this batch into the
+    // shop maps, so `shop_meta` / `shop_info_row` are current.
+    //
+    // `claim_changed`: shops whose claim moved, re-stamped onto their trade
+    // orders. Orders inserted in this same batch were joined above and the
+    // relay reducer skips no-op rewrites, so overlap is harmless.
+    //
+    // `meta_changed`: shops whose claim/name/owner/kind may have changed, or
+    // that appeared/vanished; their `shop_info` row (if any) is re-sent whole.
+    let mut claim_changed: HashSet<u64> = HashSet::new();
+    let mut meta_changed: HashSet<u64> = HashSet::new();
     for e in &update.building_state.inserts {
-        if let Some(prev) = update
+        match update
             .building_state
             .deletes
             .iter()
             .find(|d| d.row.entity_id == e.row.entity_id)
-            && prev.row.claim_entity_id != e.row.claim_entity_id
         {
-            changed_shops.insert(e.row.entity_id);
+            Some(prev) => {
+                if prev.row.claim_entity_id != e.row.claim_entity_id {
+                    claim_changed.insert(e.row.entity_id);
+                    meta_changed.insert(e.row.entity_id);
+                } else if prev.row.building_description_id != e.row.building_description_id {
+                    meta_changed.insert(e.row.entity_id);
+                }
+            }
+            None => {
+                meta_changed.insert(e.row.entity_id);
+            }
+        }
+    }
+    for e in &update.building_state.deletes {
+        if !update
+            .building_state
+            .inserts
+            .iter()
+            .any(|i| i.row.entity_id == e.row.entity_id)
+        {
+            meta_changed.insert(e.row.entity_id);
         }
     }
     for e in &update.building_nickname_state.deletes {
@@ -1377,7 +1443,7 @@ fn emit_deltas(
             .iter()
             .any(|i| i.row.entity_id == e.row.entity_id)
         {
-            changed_shops.insert(e.row.entity_id);
+            meta_changed.insert(e.row.entity_id);
         }
     }
     for e in &update.building_nickname_state.inserts {
@@ -1387,29 +1453,130 @@ fn emit_deltas(
             .iter()
             .any(|d| d.row.entity_id == e.row.entity_id && d.row.nickname == e.row.nickname);
         if !unchanged {
-            changed_shops.insert(e.row.entity_id);
+            meta_changed.insert(e.row.entity_id);
         }
     }
-    // Brand-new deployables (no same-batch delete) cannot have orders yet.
     for e in &update.deployable_state_v_2.inserts {
-        if let Some(prev) = update
+        match update
             .deployable_state_v_2
             .deletes
             .iter()
             .find(|d| d.row.entity_id == e.row.entity_id)
-            && (prev.row.claim_entity_id != e.row.claim_entity_id
-                || prev.row.nickname != e.row.nickname)
         {
-            changed_shops.insert(e.row.entity_id);
+            Some(prev) => {
+                if prev.row.claim_entity_id != e.row.claim_entity_id {
+                    claim_changed.insert(e.row.entity_id);
+                    meta_changed.insert(e.row.entity_id);
+                } else if prev.row.nickname != e.row.nickname
+                    || prev.row.owner_id != e.row.owner_id
+                    || prev.row.deployable_description_id != e.row.deployable_description_id
+                {
+                    meta_changed.insert(e.row.entity_id);
+                }
+            }
+            // Brand-new deployables cannot have orders yet, but their
+            // inventory may already be known if it arrived in an earlier batch.
+            None => {
+                meta_changed.insert(e.row.entity_id);
+            }
         }
     }
-    for shop_entity_id in changed_shops {
-        let shop = region.shop_info(shop_entity_id);
-        shop_info_updates.push(ShopInfoRow {
+    for e in &update.deployable_state_v_2.deletes {
+        if !update
+            .deployable_state_v_2
+            .inserts
+            .iter()
+            .any(|i| i.row.entity_id == e.row.entity_id)
+        {
+            meta_changed.insert(e.row.entity_id);
+        }
+    }
+    for shop_entity_id in claim_changed {
+        shop_claim_updates.push(ShopClaimRow {
             shop_entity_id,
-            claim_entity_id: shop.claim_entity_id,
-            shop_name: shop.nickname,
+            claim_entity_id: region.shop_meta(shop_entity_id).claim_entity_id,
         });
+    }
+
+    // Shops entering/leaving the world (`barter_stall_state`): building
+    // built/destroyed, trader stand placed/stowed. Their `shop_info` row comes
+    // and goes and their orders' `active` flag follows. A delete+insert pair is
+    // an in-place update of a row prism mirrors nothing from, so it is ignored.
+    //
+    // A destroyed stall building never comes back (a rebuild gets new ids), and
+    // upstream deletes its orders and inventories as their own row deltas.
+    // Those reach the relay module independently of this delete, in either
+    // order: each reducer tolerates rows that are already gone.
+    for e in &update.barter_stall_state.inserts {
+        let eid = e.row.entity_id;
+        if !update
+            .barter_stall_state
+            .deletes
+            .iter()
+            .any(|d| d.row.entity_id == eid)
+        {
+            meta_changed.insert(eid);
+            shop_active_updates.push(ShopActiveRow {
+                shop_entity_id: eid,
+                active: true,
+            });
+        }
+    }
+    for e in &update.barter_stall_state.deletes {
+        let eid = e.row.entity_id;
+        if !update
+            .barter_stall_state
+            .inserts
+            .iter()
+            .any(|i| i.row.entity_id == eid)
+        {
+            shop_info_deletes.push(eid);
+            shop_active_updates.push(ShopActiveRow {
+                shop_entity_id: eid,
+                active: false,
+            });
+        }
+    }
+    // A metadata change only re-sends rows that exist: most buildings and
+    // deployables are not shops.
+    for shop_entity_id in meta_changed {
+        if let Some(row) = region.shop_info_row(region_id, shop_entity_id) {
+            shop_info_upserts.push(row);
+        }
+    }
+
+    // Shop inventories, passed straight through as half-updates (items /
+    // cargo) that the relay module merges per shop. Upstream sends whole rows,
+    // so the latest insert per inventory wins; a delete with no re-insert (the
+    // shop left the world) clears the halves that inventory backed.
+    let mut latest_inventory: HashMap<u64, &InventoryState> = HashMap::new();
+    for e in &update.inventory_state.inserts {
+        latest_inventory.insert(e.row.entity_id, &e.row);
+    }
+    for row in latest_inventory.values() {
+        let pockets: Vec<PocketRow> = row.pockets.iter().map(pocket_row).collect();
+        for (part, half) in inventory_halves(row.cargo_index, &pockets) {
+            shop_inventory_updates.push(ShopInventoryUpdateRow {
+                shop_entity_id: row.owner_entity_id,
+                region_id,
+                part,
+                pockets: half.to_vec(),
+            });
+        }
+    }
+    for e in &update.inventory_state.deletes {
+        if latest_inventory.contains_key(&e.row.entity_id) {
+            continue;
+        }
+        let pockets: Vec<PocketRow> = e.row.pockets.iter().map(pocket_row).collect();
+        for (part, _) in inventory_halves(e.row.cargo_index, &pockets) {
+            shop_inventory_updates.push(ShopInventoryUpdateRow {
+                shop_entity_id: e.row.owner_entity_id,
+                region_id,
+                part,
+                pockets: Vec::new(),
+            });
+        }
     }
 
     // Sales. Upstream event rows arrive as insert/delete pairs; only inserts matter.
@@ -1588,10 +1755,34 @@ fn emit_deltas(
             std::iter::once(RelayMsg::DeleteTradeOrders(trade_order_deletes)),
         );
     }
-    if !shop_info_updates.is_empty() {
+    if !shop_claim_updates.is_empty() {
         send_relay(
             &sinks.relay_tx,
-            std::iter::once(RelayMsg::SetShopInfo(shop_info_updates)),
+            std::iter::once(RelayMsg::SetShopClaims(shop_claim_updates)),
+        );
+    }
+    if !shop_info_upserts.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::UpsertShopInfo(shop_info_upserts)),
+        );
+    }
+    if !shop_info_deletes.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::DeleteShopInfo(shop_info_deletes)),
+        );
+    }
+    if !shop_active_updates.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::SetShopActive(shop_active_updates)),
+        );
+    }
+    if !shop_inventory_updates.is_empty() {
+        send_relay(
+            &sinks.relay_tx,
+            std::iter::once(RelayMsg::UpdateShopInventories(shop_inventory_updates)),
         );
     }
     if !trade_event_inserts.is_empty() {

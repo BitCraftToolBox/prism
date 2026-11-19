@@ -15,6 +15,8 @@ pub mod bulk_replace_herds_reducer;
 pub mod bulk_replace_player_states_reducer;
 pub mod bulk_replace_players_reducer;
 pub mod bulk_replace_resources_reducer;
+pub mod bulk_replace_shop_info_reducer;
+pub mod bulk_replace_shop_inventories_reducer;
 pub mod bulk_replace_trade_orders_reducer;
 pub mod claim_info_field_type;
 pub mod claim_info_table;
@@ -47,6 +49,7 @@ pub mod delete_players_reducer;
 pub mod delete_recipe_meta_reducer;
 pub mod delete_regions_reducer;
 pub mod delete_resources_reducer;
+pub mod delete_shop_info_reducer;
 pub mod delete_trade_orders_reducer;
 pub mod enemy_location_table;
 pub mod enemy_location_type;
@@ -62,6 +65,7 @@ pub mod insert_enemies_reducer;
 pub mod insert_growth_timers_reducer;
 pub mod insert_resources_reducer;
 pub mod insert_trade_events_reducer;
+pub mod inventory_part_type;
 pub mod item_stack_type;
 pub mod item_type_type;
 pub mod mobile_move_update_type;
@@ -71,6 +75,7 @@ pub mod player_location_type;
 pub mod player_rename_update_type;
 pub mod player_state_table;
 pub mod player_state_type;
+pub mod pocket_type;
 pub mod recipe_meta_table;
 pub mod recipe_meta_type;
 pub mod reconcile_crafts_reducer;
@@ -84,8 +89,15 @@ pub mod schedule_craft_expiry_reducer;
 pub mod set_claim_owners_reducer;
 pub mod set_players_offline_reducer;
 pub mod set_players_online_reducer;
-pub mod set_shop_info_reducer;
-pub mod shop_info_update_type;
+pub mod set_shop_active_reducer;
+pub mod set_shop_claims_reducer;
+pub mod shop_active_update_type;
+pub mod shop_claim_update_type;
+pub mod shop_info_table;
+pub mod shop_info_type;
+pub mod shop_inventory_table;
+pub mod shop_inventory_type;
+pub mod shop_inventory_update_type;
 pub mod shop_type_type;
 pub mod toggle_public_reducer;
 pub mod trade_event_history_table;
@@ -94,6 +106,7 @@ pub mod trade_event_type;
 pub mod trade_order_table;
 pub mod trade_order_type;
 pub mod update_claim_info_reducer;
+pub mod update_shop_inventories_reducer;
 pub mod upsert_claim_info_reducer;
 pub mod upsert_claim_members_reducer;
 pub mod upsert_claim_meta_reducer;
@@ -104,6 +117,7 @@ pub mod upsert_player_states_reducer;
 pub mod upsert_players_reducer;
 pub mod upsert_recipe_meta_reducer;
 pub mod upsert_regions_reducer;
+pub mod upsert_shop_info_reducer;
 pub mod upsert_trade_orders_reducer;
 
 pub use apply_craft_progress_deltas_reducer::apply_craft_progress_deltas;
@@ -115,6 +129,8 @@ pub use bulk_replace_herds_reducer::bulk_replace_herds;
 pub use bulk_replace_player_states_reducer::bulk_replace_player_states;
 pub use bulk_replace_players_reducer::bulk_replace_players;
 pub use bulk_replace_resources_reducer::bulk_replace_resources;
+pub use bulk_replace_shop_info_reducer::bulk_replace_shop_info;
+pub use bulk_replace_shop_inventories_reducer::bulk_replace_shop_inventories;
 pub use bulk_replace_trade_orders_reducer::bulk_replace_trade_orders;
 pub use claim_info_field_type::ClaimInfoField;
 pub use claim_info_table::*;
@@ -147,6 +163,7 @@ pub use delete_players_reducer::delete_players;
 pub use delete_recipe_meta_reducer::delete_recipe_meta;
 pub use delete_regions_reducer::delete_regions;
 pub use delete_resources_reducer::delete_resources;
+pub use delete_shop_info_reducer::delete_shop_info;
 pub use delete_trade_orders_reducer::delete_trade_orders;
 pub use enemy_location_table::*;
 pub use enemy_location_type::EnemyLocation;
@@ -162,6 +179,7 @@ pub use insert_enemies_reducer::insert_enemies;
 pub use insert_growth_timers_reducer::insert_growth_timers;
 pub use insert_resources_reducer::insert_resources;
 pub use insert_trade_events_reducer::insert_trade_events;
+pub use inventory_part_type::InventoryPart;
 pub use item_stack_type::ItemStack;
 pub use item_type_type::ItemType;
 pub use mobile_move_update_type::MobileMoveUpdate;
@@ -171,6 +189,7 @@ pub use player_location_type::PlayerLocation;
 pub use player_rename_update_type::PlayerRenameUpdate;
 pub use player_state_table::*;
 pub use player_state_type::PlayerState;
+pub use pocket_type::Pocket;
 pub use recipe_meta_table::*;
 pub use recipe_meta_type::RecipeMeta;
 pub use reconcile_crafts_reducer::reconcile_crafts;
@@ -184,8 +203,15 @@ pub use schedule_craft_expiry_reducer::schedule_craft_expiry;
 pub use set_claim_owners_reducer::set_claim_owners;
 pub use set_players_offline_reducer::set_players_offline;
 pub use set_players_online_reducer::set_players_online;
-pub use set_shop_info_reducer::set_shop_info;
-pub use shop_info_update_type::ShopInfoUpdate;
+pub use set_shop_active_reducer::set_shop_active;
+pub use set_shop_claims_reducer::set_shop_claims;
+pub use shop_active_update_type::ShopActiveUpdate;
+pub use shop_claim_update_type::ShopClaimUpdate;
+pub use shop_info_table::*;
+pub use shop_info_type::ShopInfo;
+pub use shop_inventory_table::*;
+pub use shop_inventory_type::ShopInventory;
+pub use shop_inventory_update_type::ShopInventoryUpdate;
 pub use shop_type_type::ShopType;
 pub use toggle_public_reducer::toggle_public;
 pub use trade_event_history_table::*;
@@ -194,6 +220,7 @@ pub use trade_event_type::TradeEvent;
 pub use trade_order_table::*;
 pub use trade_order_type::TradeOrder;
 pub use update_claim_info_reducer::update_claim_info;
+pub use update_shop_inventories_reducer::update_shop_inventories;
 pub use upsert_claim_info_reducer::upsert_claim_info;
 pub use upsert_claim_members_reducer::upsert_claim_members;
 pub use upsert_claim_meta_reducer::upsert_claim_meta;
@@ -204,6 +231,7 @@ pub use upsert_player_states_reducer::upsert_player_states;
 pub use upsert_players_reducer::upsert_players;
 pub use upsert_recipe_meta_reducer::upsert_recipe_meta;
 pub use upsert_regions_reducer::upsert_regions;
+pub use upsert_shop_info_reducer::upsert_shop_info;
 pub use upsert_trade_orders_reducer::upsert_trade_orders;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -252,6 +280,14 @@ pub enum Reducer {
         rows: Vec<ResourceLocation>,
         total: u32,
     },
+    BulkReplaceShopInfo {
+        region_id: u8,
+        rows: Vec<ShopInfo>,
+    },
+    BulkReplaceShopInventories {
+        region_id: u8,
+        rows: Vec<ShopInventory>,
+    },
     BulkReplaceTradeOrders {
         region_id: u8,
         rows: Vec<TradeOrder>,
@@ -282,6 +318,9 @@ pub enum Reducer {
     },
     DeleteResources {
         entity_ids: Vec<u64>,
+    },
+    DeleteShopInfo {
+        ids: Vec<u64>,
     },
     DeleteTradeOrders {
         ids: Vec<u64>,
@@ -321,14 +360,20 @@ pub enum Reducer {
     SetPlayersOnline {
         entity_ids: Vec<u64>,
     },
-    SetShopInfo {
-        updates: Vec<ShopInfoUpdate>,
+    SetShopActive {
+        updates: Vec<ShopActiveUpdate>,
+    },
+    SetShopClaims {
+        updates: Vec<ShopClaimUpdate>,
     },
     TogglePublic {
         updates: Vec<CraftPublicUpdate>,
     },
     UpdateClaimInfo {
         updates: Vec<ClaimInfoUpdate>,
+    },
+    UpdateShopInventories {
+        updates: Vec<ShopInventoryUpdate>,
     },
     UpsertClaimInfo {
         rows: Vec<ClaimInfo>,
@@ -360,6 +405,9 @@ pub enum Reducer {
     UpsertRegions {
         rows: Vec<Region>,
     },
+    UpsertShopInfo {
+        rows: Vec<ShopInfo>,
+    },
     UpsertTradeOrders {
         rows: Vec<TradeOrder>,
     },
@@ -380,6 +428,8 @@ impl __sdk::Reducer for Reducer {
             Reducer::BulkReplacePlayerStates { .. } => "bulk_replace_player_states",
             Reducer::BulkReplacePlayers { .. } => "bulk_replace_players",
             Reducer::BulkReplaceResources { .. } => "bulk_replace_resources",
+            Reducer::BulkReplaceShopInfo { .. } => "bulk_replace_shop_info",
+            Reducer::BulkReplaceShopInventories { .. } => "bulk_replace_shop_inventories",
             Reducer::BulkReplaceTradeOrders { .. } => "bulk_replace_trade_orders",
             Reducer::DeleteClaimMembers { .. } => "delete_claim_members",
             Reducer::DeleteClaims { .. } => "delete_claims",
@@ -390,6 +440,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteRecipeMeta { .. } => "delete_recipe_meta",
             Reducer::DeleteRegions { .. } => "delete_regions",
             Reducer::DeleteResources { .. } => "delete_resources",
+            Reducer::DeleteShopInfo { .. } => "delete_shop_info",
             Reducer::DeleteTradeOrders { .. } => "delete_trade_orders",
             Reducer::InitRelay => "init_relay",
             Reducer::InsertEnemies { .. } => "insert_enemies",
@@ -403,9 +454,11 @@ impl __sdk::Reducer for Reducer {
             Reducer::SetClaimOwners { .. } => "set_claim_owners",
             Reducer::SetPlayersOffline { .. } => "set_players_offline",
             Reducer::SetPlayersOnline { .. } => "set_players_online",
-            Reducer::SetShopInfo { .. } => "set_shop_info",
+            Reducer::SetShopActive { .. } => "set_shop_active",
+            Reducer::SetShopClaims { .. } => "set_shop_claims",
             Reducer::TogglePublic { .. } => "toggle_public",
             Reducer::UpdateClaimInfo { .. } => "update_claim_info",
+            Reducer::UpdateShopInventories { .. } => "update_shop_inventories",
             Reducer::UpsertClaimInfo { .. } => "upsert_claim_info",
             Reducer::UpsertClaimMembers { .. } => "upsert_claim_members",
             Reducer::UpsertClaimMeta { .. } => "upsert_claim_meta",
@@ -416,6 +469,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::UpsertPlayers { .. } => "upsert_players",
             Reducer::UpsertRecipeMeta { .. } => "upsert_recipe_meta",
             Reducer::UpsertRegions { .. } => "upsert_regions",
+            Reducer::UpsertShopInfo { .. } => "upsert_shop_info",
             Reducer::UpsertTradeOrders { .. } => "upsert_trade_orders",
             _ => unreachable!(),
         }
@@ -492,6 +546,18 @@ impl __sdk::Reducer for Reducer {
                 rows: rows.clone(),
                 total: total.clone(),
             }),
+            Reducer::BulkReplaceShopInfo { region_id, rows } => {
+                __sats::bsatn::to_vec(&bulk_replace_shop_info_reducer::BulkReplaceShopInfoArgs {
+                    region_id: region_id.clone(),
+                    rows: rows.clone(),
+                })
+            }
+            Reducer::BulkReplaceShopInventories { region_id, rows } => __sats::bsatn::to_vec(
+                &bulk_replace_shop_inventories_reducer::BulkReplaceShopInventoriesArgs {
+                    region_id: region_id.clone(),
+                    rows: rows.clone(),
+                },
+            ),
             Reducer::BulkReplaceTradeOrders { region_id, rows } => __sats::bsatn::to_vec(
                 &bulk_replace_trade_orders_reducer::BulkReplaceTradeOrdersArgs {
                     region_id: region_id.clone(),
@@ -541,6 +607,11 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteResources { entity_ids } => {
                 __sats::bsatn::to_vec(&delete_resources_reducer::DeleteResourcesArgs {
                     entity_ids: entity_ids.clone(),
+                })
+            }
+            Reducer::DeleteShopInfo { ids } => {
+                __sats::bsatn::to_vec(&delete_shop_info_reducer::DeleteShopInfoArgs {
+                    ids: ids.clone(),
                 })
             }
             Reducer::DeleteTradeOrders { ids } => {
@@ -606,8 +677,13 @@ impl __sdk::Reducer for Reducer {
                     entity_ids: entity_ids.clone(),
                 })
             }
-            Reducer::SetShopInfo { updates } => {
-                __sats::bsatn::to_vec(&set_shop_info_reducer::SetShopInfoArgs {
+            Reducer::SetShopActive { updates } => {
+                __sats::bsatn::to_vec(&set_shop_active_reducer::SetShopActiveArgs {
+                    updates: updates.clone(),
+                })
+            }
+            Reducer::SetShopClaims { updates } => {
+                __sats::bsatn::to_vec(&set_shop_claims_reducer::SetShopClaimsArgs {
                     updates: updates.clone(),
                 })
             }
@@ -621,6 +697,11 @@ impl __sdk::Reducer for Reducer {
                     updates: updates.clone(),
                 })
             }
+            Reducer::UpdateShopInventories { updates } => __sats::bsatn::to_vec(
+                &update_shop_inventories_reducer::UpdateShopInventoriesArgs {
+                    updates: updates.clone(),
+                },
+            ),
             Reducer::UpsertClaimInfo { rows } => {
                 __sats::bsatn::to_vec(&upsert_claim_info_reducer::UpsertClaimInfoArgs {
                     rows: rows.clone(),
@@ -669,6 +750,11 @@ impl __sdk::Reducer for Reducer {
                     rows: rows.clone(),
                 })
             }
+            Reducer::UpsertShopInfo { rows } => {
+                __sats::bsatn::to_vec(&upsert_shop_info_reducer::UpsertShopInfoArgs {
+                    rows: rows.clone(),
+                })
+            }
             Reducer::UpsertTradeOrders { rows } => {
                 __sats::bsatn::to_vec(&upsert_trade_orders_reducer::UpsertTradeOrdersArgs {
                     rows: rows.clone(),
@@ -698,6 +784,8 @@ pub struct DbUpdate {
     recipe_meta: __sdk::TableUpdate<RecipeMeta>,
     region: __sdk::TableUpdate<Region>,
     resource_location: __sdk::TableUpdate<ResourceLocation>,
+    shop_info: __sdk::TableUpdate<ShopInfo>,
+    shop_inventory: __sdk::TableUpdate<ShopInventory>,
     trade_event: __sdk::TableUpdate<TradeEvent>,
     trade_event_history: __sdk::TableUpdate<TradeEvent>,
     trade_order: __sdk::TableUpdate<TradeOrder>,
@@ -754,6 +842,12 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "resource_location" => db_update
                     .resource_location
                     .append(resource_location_table::parse_table_update(table_update)?),
+                "shop_info" => db_update
+                    .shop_info
+                    .append(shop_info_table::parse_table_update(table_update)?),
+                "shop_inventory" => db_update
+                    .shop_inventory
+                    .append(shop_inventory_table::parse_table_update(table_update)?),
                 "trade_event" => db_update
                     .trade_event
                     .append(trade_event_table::parse_table_update(table_update)?),
@@ -837,6 +931,12 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.resource_location = cache
             .apply_diff_to_table::<ResourceLocation>("resource_location", &self.resource_location)
             .with_updates_by_pk(|row| &row.entity_id);
+        diff.shop_info = cache
+            .apply_diff_to_table::<ShopInfo>("shop_info", &self.shop_info)
+            .with_updates_by_pk(|row| &row.shop_entity_id);
+        diff.shop_inventory = cache
+            .apply_diff_to_table::<ShopInventory>("shop_inventory", &self.shop_inventory)
+            .with_updates_by_pk(|row| &row.shop_entity_id);
         diff.trade_event = cache
             .apply_diff_to_table::<TradeEvent>("trade_event", &self.trade_event)
             .with_updates_by_pk(|row| &row.id);
@@ -897,6 +997,12 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "resource_location" => db_update
                     .resource_location
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "shop_info" => db_update
+                    .shop_info
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "shop_inventory" => db_update
+                    .shop_inventory
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "trade_event" => db_update
                     .trade_event
@@ -965,6 +1071,12 @@ impl __sdk::DbUpdate for DbUpdate {
                 "resource_location" => db_update
                     .resource_location
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "shop_info" => db_update
+                    .shop_info
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "shop_inventory" => db_update
+                    .shop_inventory
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "trade_event" => db_update
                     .trade_event
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1004,6 +1116,8 @@ pub struct AppliedDiff<'r> {
     recipe_meta: __sdk::TableAppliedDiff<'r, RecipeMeta>,
     region: __sdk::TableAppliedDiff<'r, Region>,
     resource_location: __sdk::TableAppliedDiff<'r, ResourceLocation>,
+    shop_info: __sdk::TableAppliedDiff<'r, ShopInfo>,
+    shop_inventory: __sdk::TableAppliedDiff<'r, ShopInventory>,
     trade_event: __sdk::TableAppliedDiff<'r, TradeEvent>,
     trade_event_history: __sdk::TableAppliedDiff<'r, TradeEvent>,
     trade_order: __sdk::TableAppliedDiff<'r, TradeOrder>,
@@ -1073,6 +1187,12 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<ResourceLocation>(
             "resource_location",
             &self.resource_location,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<ShopInfo>("shop_info", &self.shop_info, event);
+        callbacks.invoke_table_row_callbacks::<ShopInventory>(
+            "shop_inventory",
+            &self.shop_inventory,
             event,
         );
         callbacks.invoke_table_row_callbacks::<TradeEvent>("trade_event", &self.trade_event, event);
@@ -1757,6 +1877,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         recipe_meta_table::register_table(client_cache);
         region_table::register_table(client_cache);
         resource_location_table::register_table(client_cache);
+        shop_info_table::register_table(client_cache);
+        shop_inventory_table::register_table(client_cache);
         trade_event_table::register_table(client_cache);
         trade_event_history_table::register_table(client_cache);
         trade_order_table::register_table(client_cache);
@@ -1777,6 +1899,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "recipe_meta",
         "region",
         "resource_location",
+        "shop_info",
+        "shop_inventory",
         "trade_event",
         "trade_event_history",
         "trade_order",

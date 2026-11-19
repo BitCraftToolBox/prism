@@ -26,8 +26,10 @@ use relay_bindings::{
     ClaimInfoUpdate as BindingsClaimInfoUpdate, ClaimMember, ClaimMeta,
     ClaimOwnerUpdate as BindingsClaimOwnerUpdate, ClaimSupply, CraftContributionDelta, CraftExpiry,
     CraftPublicUpdate, CraftStatus, CraftUpdate, EnemyLocation, GrowthTimerUpdate, HerdLocation,
-    ItemStack, ItemType, MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate, PlayerState,
-    RecipeMeta, Region as BindingsRegion, ResourceLocation, ShopInfoUpdate, ShopType, TradeEvent, TradeOrder,
+    InventoryPart, ItemStack, ItemType, MobileMoveUpdate, PlayerLocation, PlayerRenameUpdate,
+    PlayerState, Pocket, RecipeMeta, Region as BindingsRegion, ResourceLocation, ShopActiveUpdate,
+    ShopClaimUpdate, ShopInfo, ShopInventory, ShopInventoryUpdate, ShopType, TradeEvent,
+    TradeOrder,
 };
 use relay_sdk::Timestamp;
 use tokio::sync::mpsc::Receiver;
@@ -37,9 +39,10 @@ use super::connection::{RECONNECT_DELAY, RelayConnection};
 use super::{
     ClaimInfoField, ClaimInfoRow, ClaimInfoUpdate, ClaimMemberRow, ClaimMetaRow, ClaimOwnerRow,
     ClaimSupplyRow, CraftContributionDeltaRow, CraftExpiryRow, CraftExpiryStatus,
-    CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, ItemKind,
-    ItemStackRow, MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow, RecipeMetaRow,
-    RegionRow, RelayMsg, ResourceRow, ShopInfoRow, ShopKind, TradeEventRow, TradeOrderRow,
+    CraftPublicUpdateRow, CraftUpdateRow, EnemyRow, GrowthTimerRow, HerdRow, InventoryPartKind,
+    ItemKind, ItemStackRow, MobileMoveRow, PlayerRenameRow, PlayerRow, PlayerStateRow, PocketRow,
+    RecipeMetaRow, RegionRow, RelayMsg, ResourceRow, ShopClaimRow, ShopInfoRow, ShopInventoryRow,
+    ShopInventoryUpdateRow, ShopKind, TradeEventRow, TradeOrderRow,
 };
 use crate::config::{Config, RelayConfig};
 use crate::shutdown::SharedShutdown;
@@ -57,6 +60,12 @@ const MAX_BATCH: usize = 50_000;
 /// Each ResourceLocation row is ~21 bytes (BSATN); 500 000 rows ≈ 10 MB,
 /// well under the 32 MB WebSocket message limit.
 const BULK_REPLACE_CHUNK: usize = 500_000;
+/// `shop_inventory` rows carry whole inventories (up to ~1 KB: 52 pockets for
+/// the largest stall), so they chunk far smaller than the other tables to stay
+/// under the 32MB WebSocket limit.
+const SHOP_INVENTORY_REPLACE_CHUNK: usize = 10_000;
+/// Flush threshold for pending `shop_inventory` updates, sized like the chunk above.
+const SHOP_INVENTORY_MAX_BATCH: usize = 10_000;
 
 #[derive(Default)]
 struct Batches {
@@ -95,7 +104,16 @@ struct Batches {
     claim_owner_updates: Vec<BindingsClaimOwnerUpdate>,
     trade_order_upserts: Vec<TradeOrder>,
     trade_order_deletes: Vec<u64>,
-    shop_info_updates: Vec<ShopInfoUpdate>,
+    shop_claim_updates: Vec<ShopClaimUpdate>,
+    /// Pending `shop_info` changes, last write wins: `Some` upserts, `None`
+    /// deletes, so an upsert/delete sequence within one flush keeps its order.
+    shop_info_changes: hashbrown::HashMap<u64, Option<ShopInfo>>,
+    /// Pending order `active` flags per shop, last write wins.
+    shop_active_changes: hashbrown::HashMap<u64, bool>,
+    /// Pending inventory half-updates, last write wins per (shop, half): a hot
+    /// shop's many inventory changes within one flush window collapse to one.
+    /// The halves are independent, so cross-key order does not matter.
+    shop_inventory_updates: hashbrown::HashMap<(u64, InventoryPartKind), ShopInventoryUpdate>,
     trade_event_inserts: Vec<TradeEvent>,
 }
 
@@ -311,6 +329,29 @@ fn to_trade_order(r: &TradeOrderRow) -> TradeOrder {
         required_items: r.required_items.iter().map(to_item_stack).collect(),
         claim_entity_id: r.claim_entity_id,
         region_id: r.region_id,
+        // Unused column; the name lives on `shop_info`.
+        shop_name: String::new(),
+        active: r.active,
+    }
+}
+fn to_shop_claim_update(r: &ShopClaimRow) -> ShopClaimUpdate {
+    ShopClaimUpdate {
+        shop_entity_id: r.shop_entity_id,
+        claim_entity_id: r.claim_entity_id,
+    }
+}
+fn to_pocket(r: &PocketRow) -> Pocket {
+    Pocket {
+        volume: r.volume,
+        contents: r.contents.as_ref().map(to_item_stack),
+        locked: r.locked,
+    }
+}
+fn to_shop_info(r: &ShopInfoRow) -> ShopInfo {
+    ShopInfo {
+        shop_entity_id: r.shop_entity_id,
+        region_id: r.region_id,
+        claim_entity_id: r.claim_entity_id,
         shop_name: r.shop_name.clone(),
         player_owner_id: r.player_owner_id,
         shop_type: match r.shop_type {
@@ -320,11 +361,23 @@ fn to_trade_order(r: &TradeOrderRow) -> TradeOrder {
         },
     }
 }
-fn to_shop_info_update(r: &ShopInfoRow) -> ShopInfoUpdate {
-    ShopInfoUpdate {
+fn to_shop_inventory(r: &ShopInventoryRow) -> ShopInventory {
+    ShopInventory {
         shop_entity_id: r.shop_entity_id,
-        claim_entity_id: r.claim_entity_id,
-        shop_name: r.shop_name.clone(),
+        region_id: r.region_id,
+        pockets: r.pockets.iter().map(to_pocket).collect(),
+        cargo_index: r.cargo_index,
+    }
+}
+fn to_shop_inventory_update(r: &ShopInventoryUpdateRow) -> ShopInventoryUpdate {
+    ShopInventoryUpdate {
+        shop_entity_id: r.shop_entity_id,
+        region_id: r.region_id,
+        part: match r.part {
+            InventoryPartKind::Items => InventoryPart::Items,
+            InventoryPartKind::Cargo => InventoryPart::Cargo,
+        },
+        pockets: r.pockets.iter().map(to_pocket).collect(),
     }
 }
 fn to_trade_event(r: &TradeEventRow) -> TradeEvent {
@@ -607,6 +660,66 @@ pub async fn run(
                             }
                         }
                     }
+                    RelayMsg::ReplaceShopInfo { region_id, rows } => {
+                        flush_trade_batch(&conn, &mut batches);
+                        let relay_rows: Vec<ShopInfo> = rows.iter().map(to_shop_info).collect();
+                        // As with trade orders, an empty set must still go through.
+                        info!(
+                            "relay: {} bulk_replace_shop_info count={}",
+                            region_id,
+                            relay_rows.len()
+                        );
+                        let mut chunks = relay_rows.chunks(BULK_REPLACE_CHUNK);
+                        let first = chunks.next().unwrap_or_default().to_vec();
+                        if let Err(e) = conn.bulk_replace_shop_info(region_id, first) {
+                            warn!("relay: bulk_replace_shop_info: {e:?}");
+                        }
+                        for chunk in chunks {
+                            if let Err(e) = conn.upsert_shop_info(chunk.to_vec()) {
+                                warn!("relay: bulk_shop_info chunk failed: {e:?}");
+                            }
+                        }
+                    }
+                    RelayMsg::ReplaceShopInventories { region_id, rows } => {
+                        flush_trade_batch(&conn, &mut batches);
+                        let relay_rows: Vec<ShopInventory> =
+                            rows.iter().map(to_shop_inventory).collect();
+                        // As with trade orders, an empty set must still go through.
+                        info!(
+                            "relay: {} bulk_replace_shop_inventories count={}",
+                            region_id,
+                            relay_rows.len()
+                        );
+                        let mut chunks = relay_rows.chunks(SHOP_INVENTORY_REPLACE_CHUNK);
+                        let first = chunks.next().unwrap_or_default().to_vec();
+                        if let Err(e) = conn.bulk_replace_shop_inventories(region_id, first) {
+                            warn!("relay: bulk_replace_shop_inventories: {e:?}");
+                        }
+                        // Later chunks go through the half-update reducer: a full
+                        // row is just its item half plus its cargo half.
+                        for chunk in chunks {
+                            let updates = chunk
+                                .iter()
+                                .flat_map(|inv| {
+                                    let split = (inv.cargo_index as usize).min(inv.pockets.len());
+                                    [
+                                        (InventoryPart::Items, inv.pockets[..split].to_vec()),
+                                        (InventoryPart::Cargo, inv.pockets[split..].to_vec()),
+                                    ]
+                                    .into_iter()
+                                    .map(|(part, pockets)| ShopInventoryUpdate {
+                                        shop_entity_id: inv.shop_entity_id,
+                                        region_id: inv.region_id,
+                                        part,
+                                        pockets,
+                                    })
+                                })
+                                .collect();
+                            if let Err(e) = conn.update_shop_inventories(updates) {
+                                warn!("relay: bulk_shop_inventories chunk failed: {e:?}");
+                            }
+                        }
+                    }
                     RelayMsg::InsertResource(row) => {
                         batches.resource_inserts.push(to_resource_location(&row));
                         if batches.resource_inserts.len() >= MAX_BATCH { flush_resource_batch(&conn, &mut batches); }
@@ -726,9 +839,35 @@ pub async fn run(
                         batches.trade_order_deletes.extend(ids);
                         if batches.trade_order_deletes.len() >= MAX_BATCH { flush_trade_batch(&conn, &mut batches); }
                     }
-                    RelayMsg::SetShopInfo(rows) => {
-                        batches.shop_info_updates.extend(rows.iter().map(to_shop_info_update));
-                        if batches.shop_info_updates.len() >= MAX_BATCH { flush_trade_batch(&conn, &mut batches); }
+                    RelayMsg::SetShopClaims(rows) => {
+                        batches.shop_claim_updates.extend(rows.iter().map(to_shop_claim_update));
+                        if batches.shop_claim_updates.len() >= MAX_BATCH { flush_trade_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::UpsertShopInfo(rows) => {
+                        for r in &rows {
+                            batches.shop_info_changes.insert(r.shop_entity_id, Some(to_shop_info(r)));
+                        }
+                        if batches.shop_info_changes.len() >= MAX_BATCH { flush_trade_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::DeleteShopInfo(ids) => {
+                        for id in ids {
+                            batches.shop_info_changes.insert(id, None);
+                        }
+                        if batches.shop_info_changes.len() >= MAX_BATCH { flush_trade_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::SetShopActive(rows) => {
+                        for r in &rows {
+                            batches.shop_active_changes.insert(r.shop_entity_id, r.active);
+                        }
+                        if batches.shop_active_changes.len() >= MAX_BATCH { flush_trade_batch(&conn, &mut batches); }
+                    }
+                    RelayMsg::UpdateShopInventories(rows) => {
+                        for r in &rows {
+                            batches
+                                .shop_inventory_updates
+                                .insert((r.shop_entity_id, r.part), to_shop_inventory_update(r));
+                        }
+                        if batches.shop_inventory_updates.len() >= SHOP_INVENTORY_MAX_BATCH { flush_trade_batch(&conn, &mut batches); }
                     }
                     RelayMsg::InsertTradeEvents(rows) => {
                         batches.trade_event_inserts.extend(rows.iter().map(to_trade_event));
@@ -829,7 +968,10 @@ pub async fn run(
                 histogram!("prism_relay_batch_depth", "pipeline" => "trade")
                     .record((batches.trade_order_upserts.len()
                         + batches.trade_order_deletes.len()
-                        + batches.shop_info_updates.len()
+                        + batches.shop_claim_updates.len()
+                        + batches.shop_info_changes.len()
+                        + batches.shop_active_changes.len()
+                        + batches.shop_inventory_updates.len()
                         + batches.trade_event_inserts.len()) as f64);
                 let t = std::time::Instant::now();
                 flush_trade_batch(&conn, &mut batches);
@@ -1220,13 +1362,73 @@ fn flush_trade_batch(conn: &RelayConnection, batches: &mut Batches) {
             warn!("relay: upsert_trade_orders: {e:?}");
         }
     }
-    if !batches.shop_info_updates.is_empty() {
-        let updates = std::mem::take(&mut batches.shop_info_updates);
-        debug!("relay flush: set_shop_info count={}", updates.len());
-        counter!("prism_relay_flush_rows_total", "pipeline" => "trade", "op" => "shop_info")
+    if !batches.shop_claim_updates.is_empty() {
+        let updates = std::mem::take(&mut batches.shop_claim_updates);
+        debug!("relay flush: set_shop_claims count={}", updates.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "trade", "op" => "shop_claim")
             .increment(updates.len() as u64);
-        if let Err(e) = conn.set_shop_info(updates) {
-            warn!("relay: set_shop_info: {e:?}");
+        if let Err(e) = conn.set_shop_claims(updates) {
+            warn!("relay: set_shop_claims: {e:?}");
+        }
+    }
+    if !batches.shop_info_changes.is_empty() {
+        let mut upserts = Vec::new();
+        let mut deletes = Vec::new();
+        for (id, change) in batches.shop_info_changes.drain() {
+            match change {
+                Some(row) => upserts.push(row),
+                None => deletes.push(id),
+            }
+        }
+        // Each id appears once, so upserts and deletes are disjoint.
+        if !upserts.is_empty() {
+            debug!("relay flush: upsert_shop_info count={}", upserts.len());
+            counter!("prism_relay_flush_rows_total", "pipeline" => "trade", "op" => "shop_info_upsert")
+                .increment(upserts.len() as u64);
+            if let Err(e) = conn.upsert_shop_info(upserts) {
+                warn!("relay: upsert_shop_info: {e:?}");
+            }
+        }
+        if !deletes.is_empty() {
+            debug!("relay flush: delete_shop_info count={}", deletes.len());
+            counter!("prism_relay_flush_rows_total", "pipeline" => "trade", "op" => "shop_info_delete")
+                .increment(deletes.len() as u64);
+            if let Err(e) = conn.delete_shop_info(deletes) {
+                warn!("relay: delete_shop_info: {e:?}");
+            }
+        }
+    }
+    // After order upserts, so a flag change reaches orders created this flush.
+    if !batches.shop_active_changes.is_empty() {
+        let updates: Vec<ShopActiveUpdate> = batches
+            .shop_active_changes
+            .drain()
+            .map(|(shop_entity_id, active)| ShopActiveUpdate {
+                shop_entity_id,
+                active,
+            })
+            .collect();
+        debug!("relay flush: set_shop_active count={}", updates.len());
+        counter!("prism_relay_flush_rows_total", "pipeline" => "trade", "op" => "shop_active")
+            .increment(updates.len() as u64);
+        if let Err(e) = conn.set_shop_active(updates) {
+            warn!("relay: set_shop_active: {e:?}");
+        }
+    }
+    if !batches.shop_inventory_updates.is_empty() {
+        let updates: Vec<ShopInventoryUpdate> = batches
+            .shop_inventory_updates
+            .drain()
+            .map(|(_, u)| u)
+            .collect();
+        debug!(
+            "relay flush: update_shop_inventories count={}",
+            updates.len()
+        );
+        counter!("prism_relay_flush_rows_total", "pipeline" => "trade", "op" => "shop_inventory")
+            .increment(updates.len() as u64);
+        if let Err(e) = conn.update_shop_inventories(updates) {
+            warn!("relay: update_shop_inventories: {e:?}");
         }
     }
     if !batches.trade_order_deletes.is_empty() {

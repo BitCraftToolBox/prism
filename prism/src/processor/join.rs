@@ -8,13 +8,14 @@
 
 use crate::relay::{
     ClaimInfoRow, ClaimMemberRow, ClaimMetaRow, ClaimSupplyRow, CraftUpdateRow, EnemyRow,
-    GrowthTimerRow, HerdRow, ItemKind, ItemStackRow, PlayerRow, PlayerStateRow, RecipeMetaRow,
-    RegionRow, ResourceRow, ShopKind, TradeEventRow, TradeOrderRow,
+    GrowthTimerRow, HerdRow, InventoryPartKind, ItemKind, ItemStackRow, PlayerRow, PlayerStateRow,
+    PocketRow, RecipeMetaRow, RegionRow, ResourceRow, ShopInfoRow, ShopInventoryRow, ShopKind,
+    TradeEventRow, TradeOrderRow,
 };
 use hashbrown::{HashMap, HashSet};
 use upstream_bindings::region::{
-    BarterStallInventoryChangeReason, BarterStallInventoryEvent, CraftingRecipeDesc, ItemStack,
-    ItemType, TradeOrderState,
+    BarterStallInventoryChangeReason, BarterStallInventoryEvent, CraftingRecipeDesc,
+    InventoryState, ItemStack, ItemType, Pocket, TradeOrderState,
 };
 
 #[derive(Default)]
@@ -104,9 +105,21 @@ pub struct RegionJoinState {
     /// needs it to join a shop name onto newly-inserted trade orders. Only named
     /// buildings have a row, so it stays small.
     pub building_nicknames: HashMap<u64, String>,
-    /// deployable entity_id -> claim/nickname (`deployable_state_v2`). Maintained
-    /// in both phases and retained, for the same reason as `building_nicknames`.
-    pub deployable_shops: HashMap<u64, ShopInfo>,
+    /// deployable entity_id -> claim/nickname/owner/kind (`deployable_state_v2`).
+    /// Maintained in both phases and retained, for the same reason as
+    /// `building_nicknames`.
+    pub deployable_shops: HashMap<u64, ShopMeta>,
+    /// Shops in the world: `barter_stall_state` entity ids, one per barter
+    /// stall building or placed trader stand (stowed stands drop out).
+    /// Maintained in both phases and retained: the live phase flags new trade
+    /// orders active/inactive from it and only re-sends `shop_info` rows for
+    /// shops in it. A few hundred per region.
+    pub barter_stalls: HashSet<u64>,
+    /// inventory_state entity_id -> shop inventory (`inventory_state` joined on
+    /// `barter_stall_state`). Sync phase only (cleared by clear_live_caches):
+    /// it builds the combined `shop_inventory` snapshot; live-phase changes are
+    /// passed through as half-updates and merged by the relay module.
+    pub shop_inventories: HashMap<u64, ShopInventory>,
     /// trade_order_state entity_id -> player-set order (sync phase only; cleared
     /// by clear_live_caches). Traveler orders are never stored. Live-phase
     /// changes are emitted as upserts/deletes directly from the update batch.
@@ -172,15 +185,63 @@ impl ClaimMemberData {
 /// A shop's claim (0 when none), nickname (empty when unnamed), owning player
 /// (`deployable_state_v2.owner_id`; 0 for buildings) and kind.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ShopInfo {
+pub struct ShopMeta {
     pub claim_entity_id: u64,
     pub nickname: String,
     pub owner_id: u64,
     pub kind: ShopKind,
 }
 
+/// One `inventory_state` row owned by a shop (sync-phase cache).
+#[derive(Clone, Debug)]
+pub struct ShopInventory {
+    pub owner_entity_id: u64,
+    pub inventory_index: i32,
+    pub cargo_index: i32,
+    pub pockets: Vec<PocketRow>,
+}
+
+impl ShopInventory {
+    pub fn from_row(row: &InventoryState) -> Self {
+        Self {
+            owner_entity_id: row.owner_entity_id,
+            inventory_index: row.inventory_index,
+            cargo_index: row.cargo_index,
+            pockets: row.pockets.iter().map(pocket_row).collect(),
+        }
+    }
+}
+
+pub fn pocket_row(p: &Pocket) -> PocketRow {
+    PocketRow {
+        volume: p.volume,
+        contents: p.contents.as_ref().map(item_stack_row),
+        locked: p.locked,
+    }
+}
+
+/// The halves of a shop's combined inventory that one upstream inventory
+/// backs, with its pockets for each. Pockets before `cargo_index` are items,
+/// the rest cargo. A barter stall's item inventory has `cargo_index == len`
+/// (items only) and its cargo inventory `cargo_index == 0` (cargo only); a
+/// trader stand's single inventory has both. Only halves the inventory
+/// actually has are returned, so one never clobbers the other's.
+pub fn inventory_halves(
+    cargo_index: i32,
+    pockets: &[PocketRow],
+) -> impl Iterator<Item = (InventoryPartKind, &[PocketRow])> {
+    let split = (cargo_index.max(0) as usize).min(pockets.len());
+    let (items, cargo) = pockets.split_at(split);
+    [
+        (InventoryPartKind::Items, items),
+        (InventoryPartKind::Cargo, cargo),
+    ]
+    .into_iter()
+    .filter(|(_, half)| !half.is_empty())
+}
+
 /// The subset of a player-set `trade_order_state` row mirrored into the relay.
-/// The shop's claim/name are joined in at emit time, so they are not stored.
+/// The shop's claim is joined in at emit time, so it is not stored.
 #[derive(Clone, Debug)]
 pub struct TradeOrderData {
     pub shop_entity_id: u64,
@@ -203,18 +264,22 @@ impl TradeOrderData {
         })
     }
 
-    pub fn into_row(self, id: u64, region_id: u8, shop: ShopInfo) -> TradeOrderRow {
+    pub fn into_row(
+        self,
+        id: u64,
+        region_id: u8,
+        claim_entity_id: u64,
+        active: bool,
+    ) -> TradeOrderRow {
         TradeOrderRow {
             id,
             shop_entity_id: self.shop_entity_id,
             remaining_stock: self.remaining_stock,
             offer_items: self.offer_items,
             required_items: self.required_items,
-            claim_entity_id: shop.claim_entity_id,
+            claim_entity_id,
             region_id,
-            shop_name: shop.nickname,
-            player_owner_id: shop.owner_id,
-            shop_type: shop.kind,
+            active,
         }
     }
 }
@@ -436,11 +501,11 @@ impl RegionJoinState {
     /// Claim/nickname/owner/kind for a shop, which is either a deployable or a
     /// building. Unknown shops resolve to no claim, name or owner, and
     /// `ShopKind::Unknown`.
-    pub fn shop_info(&self, shop_entity_id: u64) -> ShopInfo {
+    pub fn shop_meta(&self, shop_entity_id: u64) -> ShopMeta {
         if let Some(info) = self.deployable_shops.get(&shop_entity_id) {
             return info.clone();
         }
-        ShopInfo {
+        ShopMeta {
             claim_entity_id: self
                 .building_claim_map
                 .get(&shop_entity_id)
@@ -459,15 +524,80 @@ impl RegionJoinState {
         }
     }
 
-    /// Collect all known player-set trade orders, with shop info joined, as relay
-    /// rows for a bulk replace.
+    /// Collect all known player-set trade orders, with shop claims and the
+    /// active flag joined, as relay rows for a bulk replace.
     pub fn snapshot_trade_orders(&self, region_id: u8) -> Vec<TradeOrderRow> {
         self.trade_orders
             .iter()
             .map(|(&id, order)| {
-                order
-                    .clone()
-                    .into_row(id, region_id, self.shop_info(order.shop_entity_id))
+                let shop = order.shop_entity_id;
+                let claim = self.shop_meta(shop).claim_entity_id;
+                let active = self.barter_stalls.contains(&shop);
+                order.clone().into_row(id, region_id, claim, active)
+            })
+            .collect()
+    }
+
+    /// The relay `shop_info` row for a shop, or `None` if it is not in the
+    /// world (no `barter_stall_state` row).
+    pub fn shop_info_row(&self, region_id: u8, shop_entity_id: u64) -> Option<ShopInfoRow> {
+        if !self.barter_stalls.contains(&shop_entity_id) {
+            return None;
+        }
+        let meta = self.shop_meta(shop_entity_id);
+        Some(ShopInfoRow {
+            shop_entity_id,
+            region_id,
+            claim_entity_id: meta.claim_entity_id,
+            shop_name: meta.nickname,
+            player_owner_id: meta.owner_id,
+            shop_type: meta.kind,
+        })
+    }
+
+    /// Every shop in the world, as relay rows for a bulk replace.
+    pub fn snapshot_shop_info(&self, region_id: u8) -> Vec<ShopInfoRow> {
+        self.barter_stalls
+            .iter()
+            .filter_map(|&shop| self.shop_info_row(region_id, shop))
+            .collect()
+    }
+
+    /// Every shop's inventories merged into one row each (item halves, then
+    /// cargo halves, each in `inventory_index` order), for a bulk replace.
+    pub fn snapshot_shop_inventories(&self, region_id: u8) -> Vec<ShopInventoryRow> {
+        let mut by_shop: HashMap<u64, Vec<(i32, u64, &ShopInventory)>> = HashMap::new();
+        for (&id, inv) in &self.shop_inventories {
+            by_shop
+                .entry(inv.owner_entity_id)
+                .or_default()
+                .push((inv.inventory_index, id, inv));
+        }
+        by_shop
+            .into_iter()
+            .filter_map(|(shop_entity_id, mut invs)| {
+                invs.sort_unstable_by_key(|&(index, id, _)| (index, id));
+                let mut items = Vec::new();
+                let mut cargo = Vec::new();
+                for (_, _, inv) in invs {
+                    for (part, half) in inventory_halves(inv.cargo_index, &inv.pockets) {
+                        match part {
+                            InventoryPartKind::Items => items.extend_from_slice(half),
+                            InventoryPartKind::Cargo => cargo.extend_from_slice(half),
+                        }
+                    }
+                }
+                if items.is_empty() && cargo.is_empty() {
+                    return None;
+                }
+                let cargo_index = items.len() as u32;
+                items.extend(cargo);
+                Some(ShopInventoryRow {
+                    shop_entity_id,
+                    region_id,
+                    pockets: items,
+                    cargo_index,
+                })
             })
             .collect()
     }
@@ -619,13 +749,17 @@ impl RegionJoinState {
         // claim_member snapshot; live-phase changes are emitted as upserts /
         // deletes derived directly from update batches.
         self.claim_members = HashMap::default();
-        // trade_orders / trade_events are only needed for the initial snapshot;
-        // live-phase changes are emitted straight from update batches.
+        // trade_orders / trade_events / shop_inventories are only needed for the
+        // initial snapshot; live-phase changes are emitted straight from update
+        // batches (inventories as half-updates the relay module merges).
         self.trade_orders = HashMap::default();
         self.trade_events = Vec::default();
+        self.shop_inventories = HashMap::default();
 
         // building_nicknames and deployable_shops are retained: the live phase
-        // joins them onto new trade orders and diffs them to spot shop renames.
+        // joins them onto new trade orders / shop_info rows and diffs them to
+        // spot shop changes. barter_stalls is likewise retained: it decides the
+        // active flag of new orders and which shops have a shop_info row.
         //
         // resource_desc_tags is retained: the live phase reads it to
         // decide which newly-inserted resources warrant a growth-timer sub.
@@ -651,5 +785,123 @@ impl JoinState {
     /// Reset all state for a region on reconnect.
     pub fn reset_region(&mut self, region_id: u8) {
         self.regions.insert(region_id, RegionJoinState::default());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pocket(item_id: i32, kind: ItemKind) -> PocketRow {
+        PocketRow {
+            volume: 6000,
+            contents: Some(ItemStackRow {
+                item_id,
+                quantity: 1,
+                kind,
+                durability: None,
+            }),
+            locked: false,
+        }
+    }
+
+    fn empty() -> PocketRow {
+        PocketRow {
+            volume: 6000,
+            contents: None,
+            locked: false,
+        }
+    }
+
+    fn inv(owner: u64, index: i32, cargo_index: i32, pockets: Vec<PocketRow>) -> ShopInventory {
+        ShopInventory {
+            owner_entity_id: owner,
+            inventory_index: index,
+            cargo_index,
+            pockets,
+        }
+    }
+
+    #[test]
+    fn halves_follow_cargo_index() {
+        let pockets = vec![
+            pocket(1, ItemKind::Item),
+            empty(),
+            pocket(9, ItemKind::Cargo),
+        ];
+        // Trader stand: both halves.
+        let halves: Vec<_> = inventory_halves(2, &pockets).collect();
+        assert_eq!(halves.len(), 2);
+        assert_eq!(halves[0], (InventoryPartKind::Items, &pockets[..2]));
+        assert_eq!(halves[1], (InventoryPartKind::Cargo, &pockets[2..]));
+        // Stall item inventory (cargo_index == len): items only.
+        let halves: Vec<_> = inventory_halves(3, &pockets).collect();
+        assert_eq!(halves, vec![(InventoryPartKind::Items, &pockets[..])]);
+        // Stall cargo inventory (cargo_index == 0): cargo only.
+        let halves: Vec<_> = inventory_halves(0, &pockets).collect();
+        assert_eq!(halves, vec![(InventoryPartKind::Cargo, &pockets[..])]);
+        // Out-of-range cutoffs clamp rather than panic.
+        assert_eq!(inventory_halves(99, &pockets).count(), 1);
+        assert_eq!(inventory_halves(-1, &pockets).count(), 1);
+        assert_eq!(inventory_halves(0, &[]).count(), 0);
+    }
+
+    #[test]
+    fn snapshot_merges_stall_inventories() {
+        let mut region = RegionJoinState::default();
+        let items = vec![pocket(1, ItemKind::Item), empty()];
+        let cargo = vec![pocket(9, ItemKind::Cargo)];
+        let stand = vec![pocket(2, ItemKind::Item), pocket(8, ItemKind::Cargo)];
+        // Stall 10: cargo inventory listed first to check ordering.
+        region
+            .shop_inventories
+            .insert(101, inv(10, 1, 0, cargo.clone()));
+        region
+            .shop_inventories
+            .insert(100, inv(10, 0, 2, items.clone()));
+        // Stand 20: one mixed inventory.
+        region
+            .shop_inventories
+            .insert(200, inv(20, 0, 1, stand.clone()));
+
+        let mut rows = region.snapshot_shop_inventories(7);
+        rows.sort_by_key(|r| r.shop_entity_id);
+        assert_eq!(rows.len(), 2);
+
+        assert_eq!(rows[0].shop_entity_id, 10);
+        assert_eq!(rows[0].region_id, 7);
+        assert_eq!(rows[0].cargo_index, 2);
+        assert_eq!(rows[0].pockets, [items, cargo].concat());
+
+        assert_eq!(rows[1].shop_entity_id, 20);
+        assert_eq!(rows[1].cargo_index, 1);
+        assert_eq!(rows[1].pockets, stand);
+    }
+
+    #[test]
+    fn orders_are_active_only_in_world_shops() {
+        let mut region = RegionJoinState::default();
+        region.barter_stalls.insert(10);
+        let order = TradeOrderData {
+            shop_entity_id: 10,
+            remaining_stock: 1,
+            offer_items: vec![],
+            required_items: vec![],
+        };
+        region.trade_orders.insert(1, order.clone());
+        region.trade_orders.insert(
+            2,
+            TradeOrderData {
+                shop_entity_id: 20,
+                ..order
+            },
+        );
+        let mut rows = region.snapshot_trade_orders(7);
+        rows.sort_by_key(|r| r.id);
+        assert!(rows[0].active);
+        assert!(!rows[1].active);
+        // Only shops in the world get shop_info rows.
+        assert!(region.shop_info_row(7, 10).is_some());
+        assert!(region.shop_info_row(7, 20).is_none());
     }
 }

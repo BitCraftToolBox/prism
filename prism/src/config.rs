@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
-use serde::Deserialize;
 use log::warn;
+use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {

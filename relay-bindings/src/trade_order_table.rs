@@ -3,7 +3,6 @@
 
 #![allow(unused, clippy::all)]
 use super::item_stack_type::ItemStack;
-use super::shop_type_type::ShopType;
 use super::trade_order_type::TradeOrder;
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
