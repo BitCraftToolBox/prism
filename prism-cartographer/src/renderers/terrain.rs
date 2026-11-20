@@ -141,8 +141,9 @@ pub fn render(
         anyhow::bail!("[terrain] no region data found in {}", input_dir.display());
     }
 
-    let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> =
-        ImageBuffer::from_fn(RENDER_SIZE, RENDER_SIZE, |_, _| Rgba([0, 0, 0, 0]));
+    // One pixel per biome tile; upscaled ×RENDER_SCALE on the fly during
+    // tiling so the 38400² raster never has to exist in memory.
+    let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(WORLD_TILES, WORLD_TILES);
 
     let mut elevations: Vec<i16> = vec![NO_DATA_ELEVATION; (WORLD_TILES * WORLD_TILES) as usize];
     let mut water_types: Vec<u8> = vec![0u8; (WORLD_TILES * WORLD_TILES) as usize];
@@ -225,12 +226,7 @@ pub fn render(
                 let by = WORLD_TILES - 1 - world_z;
 
                 if bx < WORLD_TILES && by < WORLD_TILES {
-                    let rgba = Rgba([color[0], color[1], color[2], 255]);
-                    for sy in 0..RENDER_SCALE {
-                        for sx in 0..RENDER_SCALE {
-                            img.put_pixel(bx * RENDER_SCALE + sx, by * RENDER_SCALE + sy, rgba);
-                        }
-                    }
+                    img.put_pixel(bx, by, Rgba([color[0], color[1], color[2], 255]));
                 }
 
                 let ti = (by * WORLD_TILES + bx) as usize;
@@ -268,10 +264,9 @@ pub fn render(
         "[terrain] generating tile pyramid → {}",
         tiles_dir.display()
     );
-    tile_generator::generate_tiles(
-        &img,
+    tile_generator::generate_tiles_nearest(
+        &BlockUpscaled(&img),
         tiles_dir,
-        tile_generator::TileScaling::Nearest,
         canceled,
         "terrain",
     )?;
@@ -318,20 +313,29 @@ fn apply_relief(
             let t = (diff / RELIEF_MAX_DIFF).clamp(-1.0, 1.0);
             let brightness = 1.0 + t * RELIEF_STRENGTH;
 
-            for sy in 0..RENDER_SCALE {
-                for sx in 0..RENDER_SCALE {
-                    let rpx = bx * RENDER_SCALE + sx;
-                    let rpy = by * RENDER_SCALE + sy;
-                    let p = img.get_pixel(rpx, rpy);
-                    let r = (p[0] as f32 * brightness).clamp(0.0, 255.0) as u8;
-                    let g = (p[1] as f32 * brightness).clamp(0.0, 255.0) as u8;
-                    let b = (p[2] as f32 * brightness).clamp(0.0, 255.0) as u8;
-                    img.put_pixel(rpx, rpy, Rgba([r, g, b, 255]));
-                }
-            }
+            let p = img.get_pixel(bx, by);
+            let r = (p[0] as f32 * brightness).clamp(0.0, 255.0) as u8;
+            let g = (p[1] as f32 * brightness).clamp(0.0, 255.0) as u8;
+            let b = (p[2] as f32 * brightness).clamp(0.0, 255.0) as u8;
+            img.put_pixel(bx, by, Rgba([r, g, b, 255]));
         }
     }
     Ok(())
+}
+
+/// Presents the per-biome-tile image as the full `RENDER_SIZE²` raster, each
+/// tile covering a `RENDER_SCALE × RENDER_SCALE` block.
+struct BlockUpscaled<'a>(&'a ImageBuffer<Rgba<u8>, Vec<u8>>);
+
+impl tile_generator::PixelSource for BlockUpscaled<'_> {
+    fn dimensions(&self) -> (u32, u32) {
+        (RENDER_SIZE, RENDER_SIZE)
+    }
+
+    #[inline]
+    fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
+        self.0.get_pixel(x / RENDER_SCALE, y / RENDER_SCALE).0
+    }
 }
 
 fn hex_neighbors(tx: i32, tz: i32) -> [(i32, i32); 6] {

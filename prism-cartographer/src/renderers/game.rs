@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
-use image::{ImageBuffer, Rgb, Rgba};
+use image::{ImageBuffer, Rgb};
 use metrics::gauge;
 use std::io::Read;
 use std::path::Path;
@@ -77,29 +77,12 @@ pub fn render(game_map_url: &str, tiles_dir: &Path, canceled: &AtomicBool) -> Re
     // Hex-aspect-ratio correction: stretch vertically by HEX_RATIO.
     let scaled = stretch_vertical(&full_img, HEX_RATIO);
 
-    // Upscale to RENDER_SIZE so the tile grid aligns with the terrain renderer.
-    let (sw, sh) = scaled.dimensions();
-    log::info!(
-        "[game] upscaling {}×{} → {}×{} for tiling",
-        sw,
-        sh,
-        RENDER_SIZE,
-        RENDER_SIZE
-    );
-    let tiling_rgb = nn_downscale_rgb(&scaled, sw, sh, RENDER_SIZE, RENDER_SIZE);
-
-    // Convert to RGBA for shared tile generator.
-    let tiling_rgba: ImageBuffer<Rgba<u8>, Vec<u8>> =
-        ImageBuffer::from_fn(RENDER_SIZE, RENDER_SIZE, |x, y| {
-            let p = tiling_rgb.get_pixel(x, y);
-            Rgba([p[0], p[1], p[2], 255])
-        });
+    drop(full_img);
 
     log::info!("[game] generating tile pyramid → {}", tiles_dir.display());
-    tile_generator::generate_tiles(
-        &tiling_rgba,
+    tile_generator::generate_tiles_nearest(
+        &NnUpscaled(&scaled),
         tiles_dir,
-        tile_generator::TileScaling::Nearest,
         canceled,
         "game",
     )?;
@@ -146,16 +129,21 @@ fn stretch_vertical(
     })
 }
 
-fn nn_downscale_rgb(
-    img: &ImageBuffer<Rgb<u8>, Vec<u8>>,
-    src_w: u32,
-    src_h: u32,
-    dst_w: u32,
-    dst_h: u32,
-) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
-    ImageBuffer::from_fn(dst_w, dst_h, |dx, dy| {
-        let sx = (dx as f64 * src_w as f64 / dst_w as f64) as u32;
-        let sy = (dy as f64 * src_h as f64 / dst_h as f64) as u32;
-        *img.get_pixel(sx.min(src_w - 1), sy.min(src_h - 1))
-    })
+/// Presents the parsed RGB map as an opaque `RENDER_SIZE²` RGBA raster via
+/// nearest-neighbor upscaling, computed per pixel.
+struct NnUpscaled<'a>(&'a ImageBuffer<Rgb<u8>, Vec<u8>>);
+
+impl tile_generator::PixelSource for NnUpscaled<'_> {
+    fn dimensions(&self) -> (u32, u32) {
+        (RENDER_SIZE, RENDER_SIZE)
+    }
+
+    #[inline]
+    fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
+        let (src_w, src_h) = self.0.dimensions();
+        let sx = (x as f64 * src_w as f64 / RENDER_SIZE as f64) as u32;
+        let sy = (y as f64 * src_h as f64 / RENDER_SIZE as f64) as u32;
+        let p = self.0.get_pixel(sx.min(src_w - 1), sy.min(src_h - 1));
+        [p[0], p[1], p[2], 255]
+    }
 }
